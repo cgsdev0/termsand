@@ -7,9 +7,24 @@ use crossterm::{
         EnterAlternateScreen, LeaveAlternateScreen,
     },
 };
+
+use clap::Parser as ClapParser;
+
 use std::io::{self, Read, Write};
 
 use anstyle_parse::{DefaultCharAccumulator, Params, Parser, Perform};
+
+#[derive(ClapParser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// Treat border characters as static
+    #[arg(short, long)]
+    borders: bool,
+
+    /// Treat these colors as static (can specify multiple)
+    #[arg(short, long)]
+    color: Vec<u32>,
+}
 
 /// This thing parses the initial input using anstyle-parse
 struct Performer {
@@ -79,6 +94,7 @@ struct Grid {
     width: usize,
     height: usize,
     data: Box<[Cell]>,
+    args: Args,
 }
 
 fn is_box_char(data: &char) -> bool {
@@ -89,8 +105,9 @@ fn is_box_char(data: &char) -> bool {
 }
 
 impl Grid {
-    fn new(w: usize, h: usize) -> Self {
+    fn new(args: Args, w: usize, h: usize) -> Self {
         Grid {
+            args,
             width: w,
             height: h,
             data: vec![Cell { fg: 0, c: ' ' }; w * h].into_boxed_slice(),
@@ -116,13 +133,14 @@ impl Grid {
         }
     }
     fn is_static(&self, x: usize, y: usize) -> bool {
-        // Hard-coded to the color of comments in my terminal kekw
-        if is_box_char(&self.data[y * self.width + x].c) {
-            return true;
+        if self.args.borders {
+            if is_box_char(&self.data[y * self.width + x].c) {
+                return true;
+            }
         }
-        !self.is_empty(x, y) && self.data[y * self.width + x].fg == 2153144201
+        !(self.is_empty(x, y) && self.args.color.contains(&self.data[y * self.width + x].fg))
 
-        // some other colors from my theme:
+        // some colors from tokyonight-storm:
         //
         // Line numbers: 2151367265
         // Number literals:  2164235876
@@ -133,7 +151,8 @@ impl Grid {
         // keywords:  2157804760
         // white text:  2160118517
         // members:  2155076298
-        // Inactive filenames  2155051682
+        // Inactive filenames:  2155051682
+        // comments: 2153144201
     }
 
     fn is_sand(&self, x: usize, y: usize) -> bool {
@@ -202,6 +221,9 @@ impl Grid {
 }
 
 fn main() {
+    let args = Args::parse();
+    println!("{:?}", args);
+
     let Some((w, h)) = term_size::dimensions() else {
         panic!("unable to get term dimensions");
     };
@@ -210,7 +232,7 @@ fn main() {
 
     let mut statemachine = Parser::<DefaultCharAccumulator>::new();
     let mut performer = Performer {
-        grid: Grid::new(w, h),
+        grid: Grid::new(args, w, h),
         x: 0,
         y: 0,
         fg: 15,
