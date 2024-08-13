@@ -8,7 +8,7 @@ it may not work exactly right for you
 
 ## how do i use it
 
-this thing is designed to work with tmux
+this thing is designed to work with tmux 3.4+
 
 1. `cargo install --git https://github.com/cgsdev0/termsand`
 2. save this bash script to somewhere (e.g. `sand.sh`):
