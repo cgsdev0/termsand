@@ -27,6 +27,10 @@ struct Args {
     /// List all of the colors piped in, and do nothing else
     #[arg(long)]
     list_colors: bool,
+
+    /// Enable anti-gravity
+    #[arg(short, long)]
+    antigravity: bool,
 }
 
 /// This thing parses the initial input using anstyle-parse
@@ -208,25 +212,33 @@ impl Grid {
         execute!(lock, MoveTo(0, 0)).unwrap();
     }
     fn step(&mut self) {
-        for y in (1..self.height).rev() {
+        let range: Box<dyn Iterator<Item = usize>> = match self.args.antigravity {
+            true => Box::new(0..self.height - 1),
+            false => Box::new((1..self.height).rev()),
+        };
+        for y in range {
+            let delta: usize = match self.args.antigravity {
+                true => y + 1,
+                false => y - 1,
+            };
             for x in 0..self.width {
-                if self.is_sand(x, y - 1) {
+                if self.is_sand(x, delta) {
                     let rand_choice = rand::random::<f32>();
 
                     if self.is_empty(x, y) && !self.is_static(x, y) {
-                        self.swap(x, y, x, y - 1);
+                        self.swap(x, y, x, delta);
                     } else if rand_choice < 0.5
                         && x > 0
                         && self.is_empty(x - 1, y)
                         && !self.is_static(x - 1, y)
                     {
-                        self.swap(x - 1, y, x, y - 1);
+                        self.swap(x - 1, y, x, delta);
                     } else if rand_choice >= 0.5
                         && x < self.width - 1
                         && self.is_empty(x + 1, y)
                         && !self.is_static(x + 1, y)
                     {
-                        self.swap(x + 1, y, x, y - 1);
+                        self.swap(x + 1, y, x, delta);
                     }
                 }
             }
