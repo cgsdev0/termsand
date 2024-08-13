@@ -14,13 +14,15 @@ that said, here's some GIFs
 
 ## how do i use it
 
-this thing is designed to work with tmux. there's 2 scripts involved in my setup
+this thing is designed to work with tmux
 
-(almost certainly definitely they do not work on macOS lmao)
+1. cargo install --git
+2. use [this bash script](https://gist.github.com/cgsdev0/c5fd87b0213992bd50194f315296dc98)
+3. bind it to a key in your `tmux.conf` like this:
+```
+bind-key e run-shell "./sand.sh sand"
+```
 
-https://github.com/cgsdev0/dotfiles/blob/main/bin/experiment
-https://github.com/cgsdev0/dotfiles/blob/main/bin/popup
+and then maybe it will work
 
-if you invoke `experiment sand`, *in theory* it will do the stuff (if you have termsand installed)
-
-ehhm, yeah, good luck have fun
+good luck have fun
