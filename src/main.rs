@@ -3,15 +3,15 @@ use crossterm::{
     cursor::{Hide, MoveTo, MoveToNextLine, Show},
     execute,
     terminal::{
-        disable_raw_mode, enable_raw_mode, BeginSynchronizedUpdate, Clear, ClearType,
-        EndSynchronizedUpdate, EnterAlternateScreen, LeaveAlternateScreen,
+        disable_raw_mode, enable_raw_mode, BeginSynchronizedUpdate, EndSynchronizedUpdate,
+        EnterAlternateScreen, LeaveAlternateScreen,
     },
 };
 use std::io::{self, Read, Write};
 
 use anstyle_parse::{DefaultCharAccumulator, Params, Parser, Perform};
 
-/// A type implementing Perform that just logs actions
+/// This thing parses the initial input using anstyle-parse
 struct Performer {
     grid: Grid,
     x: usize,
@@ -21,7 +21,6 @@ struct Performer {
 
 impl Perform for Performer {
     fn print(&mut self, c: char) {
-        // println!("[print] {:?}", c);
         let cell = self.grid.get_mut(self.x, self.y);
         cell.c = c;
         cell.fg = self.fg;
@@ -29,47 +28,22 @@ impl Perform for Performer {
     }
 
     fn execute(&mut self, byte: u8) {
-        // println!("[execute] {:02x}", byte);
         if byte == 0x0a {
             self.y += 1;
             self.x = 0;
         }
     }
 
-    fn hook(&mut self, params: &Params, intermediates: &[u8], ignore: bool, c: u8) {
+    fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8], ignore: bool, c: u8) {
         // println!(
-        //     "[hook] params={:?}, intermediates={:?}, ignore={:?}, char={:?}",
+        //     "[csi_dispatch] params={:#?}, intermediates={:?}, ignore={:?}, char={:?}",
         //     params, intermediates, ignore, c
         // );
-    }
-
-    fn put(&mut self, byte: u8) {
-        // println!("[put] {:02x}", byte);
-    }
-
-    fn unhook(&mut self) {
-        // println!("[unhook]");
-    }
-
-    fn osc_dispatch(&mut self, params: &[&[u8]], bell_terminated: bool) {
-        // println!(
-        //     "[osc_dispatch] params={:?} bell_terminated={}",
-        //     params, bell_terminated
-        // );
-    }
-
-    fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8], ignore: bool, c: u8) {
-        println!(
-            "[csi_dispatch] params={:#?}, intermediates={:?}, ignore={:?}, char={:?}",
-            params, intermediates, ignore, c
-        );
         let items: Vec<_> = params.iter().collect();
-
         {
             match items[0][0] {
                 0 => {
                     self.fg = 15;
-                    // println!("Resetting fg");
                 }
                 30..=37 => {
                     self.fg = (items[0][0] - 30) as u32;
@@ -77,7 +51,6 @@ impl Perform for Performer {
                 38 => {
                     if items[1][0] == 5 {
                         self.fg = items[2][0] as u32;
-                        // println!("Setting fg to {}", self.fg);
                     } else if items[1][0] == 2 {
                         self.fg = (1 << 31)
                             ^ ((items[2][0] as u32) << 16)
@@ -87,7 +60,6 @@ impl Perform for Performer {
                 }
                 39 => {
                     self.fg = 15;
-                    // println!("Resetting fg");
                 }
                 90..=97 => {
                     self.fg = (items[0][0] - 82) as u32;
@@ -95,13 +67,6 @@ impl Perform for Performer {
                 _ => {}
             }
         }
-    }
-
-    fn esc_dispatch(&mut self, intermediates: &[u8], ignore: bool, byte: u8) {
-        // println!(
-        //     "[esc_dispatch] intermediates={:?}, ignore={:?}, byte={:02x}",
-        //     intermediates, ignore, byte
-        // );
     }
 }
 
@@ -118,29 +83,18 @@ struct Grid {
 
 impl Grid {
     fn new(w: usize, h: usize) -> Self {
-        //allocate the map data
-        // create the map structure
         Grid {
             width: w,
             height: h,
             data: vec![Cell { fg: 0, c: ' ' }; w * h].into_boxed_slice(),
         }
     }
-    // Method to get a value at position (x, y)
+
     fn get_mut(&mut self, x: usize, y: usize) -> &mut Cell {
-        assert!(x < self.width && y < self.height, "Index out of bounds");
         &mut self.data[y * self.width + x]
     }
-    fn swap(&mut self, x1: usize, y1: usize, x2: usize, y2: usize) {
-        assert!(
-            x1 < self.width && y1 < self.height,
-            "First index out of bounds"
-        );
-        assert!(
-            x2 < self.width && y2 < self.height,
-            "Second index out of bounds"
-        );
 
+    fn swap(&mut self, x1: usize, y1: usize, x2: usize, y2: usize) {
         let idx1 = y1 * self.width + x1;
         let idx2 = y2 * self.width + x2;
 
@@ -155,6 +109,11 @@ impl Grid {
         }
     }
     fn is_static(&self, x: usize, y: usize) -> bool {
+        // Hard-coded to the color of comments in my terminal kekw
+        !self.is_empty(x, y) && self.data[y * self.width + x].fg == 2153144201
+
+        // some other colors from my theme:
+        //
         // Line numbers: 2151367265
         // Number literals:  2164235876
         // Function names: 2150286302
@@ -165,7 +124,6 @@ impl Grid {
         // white text:  2160118517
         // members:  2155076298
         // Inactive filenames  2155051682
-        !self.is_empty(x, y) && self.data[y * self.width + x].fg == 2153144201
     }
 
     fn is_sand(&self, x: usize, y: usize) -> bool {
@@ -178,12 +136,6 @@ impl Grid {
             return true;
         }
         return false;
-    }
-
-    // Method to set a value at position (x, y)
-    fn set(&mut self, x: usize, y: usize, value: Cell) {
-        assert!(x < self.width && y < self.height, "Index out of bounds");
-        self.data[y * self.width + x] = value;
     }
 
     fn render(&self) {
@@ -218,17 +170,14 @@ impl Grid {
                 if self.is_sand(x, y - 1) {
                     let rand_choice = rand::random::<f32>();
 
-                    // Check if the cell below is empty and not a static object
                     if self.is_empty(x, y) && !self.is_static(x, y) {
                         self.swap(x, y, x, y - 1);
-                    // Check if the cell to the bottom-left is empty and not a static object
                     } else if rand_choice < 0.5
                         && x > 0
                         && self.is_empty(x - 1, y)
                         && !self.is_static(x - 1, y)
                     {
                         self.swap(x - 1, y, x, y - 1);
-                    // Check if the cell to the bottom-right is empty and not a static object
                     } else if rand_choice >= 0.5
                         && x < self.width - 1
                         && self.is_empty(x + 1, y)
@@ -246,7 +195,6 @@ fn main() {
     let Some((w, h)) = term_size::dimensions() else {
         panic!("unable to get term dimensions");
     };
-    // println!("Width: {}\nHeight: {}", w, h);
     let input = io::stdin();
     let mut handle = input.lock();
 
@@ -268,8 +216,7 @@ fn main() {
                     statemachine.advance(&mut performer, *byte);
                 }
             }
-            Err(err) => {
-                // println!("err: {}", err);
+            Err(_err) => {
                 break;
             }
         }
