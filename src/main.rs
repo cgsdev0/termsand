@@ -81,6 +81,13 @@ struct Grid {
     data: Box<[Cell]>,
 }
 
+fn is_box_char(data: &char) -> bool {
+    match *data {
+        '\u{2500}'..='\u{257F}' => true,
+        _ => false,
+    }
+}
+
 impl Grid {
     fn new(w: usize, h: usize) -> Self {
         Grid {
@@ -110,6 +117,9 @@ impl Grid {
     }
     fn is_static(&self, x: usize, y: usize) -> bool {
         // Hard-coded to the color of comments in my terminal kekw
+        if is_box_char(&self.data[y * self.width + x].c) {
+            return true;
+        }
         !self.is_empty(x, y) && self.data[y * self.width + x].fg == 2153144201
 
         // some other colors from my theme:
