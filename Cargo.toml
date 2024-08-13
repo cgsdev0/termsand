@@ -7,3 +7,6 @@ edition = "2021"
 
 [dependencies]
 anstyle-parse = "0.2.5"
+crossterm = "0.28.1"
+rand = "0.8.5"
+term_size = "0.3.2"
