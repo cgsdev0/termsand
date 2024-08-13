@@ -16,11 +16,13 @@ this thing is designed to work with tmux 3.4+
 ```bash
 #!/bin/bash
 
+ARGS="$@"
+
 popup() {
   TMP="$(mktemp)"
   trap "rm $TMP" EXIT
   cat > "$TMP"
-  tmux display-popup -w $WIDTH -h $HEIGHT $* "cat \"$TMP\" | termsand"
+  tmux display-popup -w $WIDTH -h $HEIGHT $* "cat \"$TMP\" | termsand $ARGS"
 }
 
 PANE=$(tmux display -p "#{pane_id}")
