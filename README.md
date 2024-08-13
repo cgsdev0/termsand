@@ -37,7 +37,7 @@ echo -e "$STUFF" \
 ```
 3. bind it to a key in your `tmux.conf` like this:
 ```
-bind-key e run-shell "./sand.sh sand"
+bind-key e run-shell "./sand.sh"
 ```
 
 and then maybe it will work
