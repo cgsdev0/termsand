@@ -11,32 +11,7 @@ it may not work exactly right for you
 this thing is designed to work with tmux 3.4+
 
 1. `cargo install --git https://github.com/cgsdev0/termsand`
-2. save this bash script to somewhere (e.g. `sand.sh`):
-
-```bash
-#!/bin/bash
-
-ARGS="$@"
-
-popup() {
-  TMP="$(mktemp)"
-  trap "rm $TMP" EXIT
-  cat > "$TMP"
-  tmux display-popup -w $WIDTH -h $HEIGHT $* "cat \"$TMP\" | termsand $ARGS"
-}
-
-PANE=$(tmux display -p "#{pane_id}")
-DIMENSIONS="$(tmux display -p "#{pane_width}x#{pane_height}")"
-POSITION="$(tmux display -p "#{pane_left}x#{pane_top}")"
-HEIGHT="${DIMENSIONS#*x}"
-WIDTH="${DIMENSIONS%x*}"
-Y="${POSITION#*x}"
-((Y+=HEIGHT+1))
-X="${POSITION%x*}"
-STUFF="$(tmux capture-pane -p -e -t "$PANE")"
-echo -e "$STUFF" \
-  | popup -E -B -y$Y -x$X -w $WIDTH -h $HEIGHT
-```
+2. download [`sand.sh`](https://github.com/cgsdev0/termsand/blob/main/sand.sh) to somewhere
 3. bind it to a key in your `tmux.conf` like this:
 ```
 bind-key e run-shell "./sand.sh"

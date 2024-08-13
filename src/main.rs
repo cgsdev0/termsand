@@ -24,6 +24,9 @@ struct Args {
     /// Treat these colors as static (can specify multiple)
     #[arg(short, long)]
     color: Vec<u32>,
+    /// List all of the colors piped in, and do nothing else
+    #[arg(long)]
+    list_colors: bool,
 }
 
 /// This thing parses the initial input using anstyle-parse
@@ -32,6 +35,7 @@ struct Performer {
     x: usize,
     y: usize,
     fg: u32,
+    colors: std::collections::HashSet<u32>,
 }
 
 impl Perform for Performer {
@@ -59,25 +63,31 @@ impl Perform for Performer {
             match items[0][0] {
                 0 => {
                     self.fg = 15;
+                    self.colors.insert(self.fg);
                 }
                 30..=37 => {
                     self.fg = (items[0][0] - 30) as u32;
+                    self.colors.insert(self.fg);
                 }
                 38 => {
                     if items[1][0] == 5 {
                         self.fg = items[2][0] as u32;
+                        self.colors.insert(self.fg);
                     } else if items[1][0] == 2 {
                         self.fg = (1 << 31)
                             ^ ((items[2][0] as u32) << 16)
                             ^ ((items[3][0] as u32) << 8)
                             ^ (items[4][0] as u32);
+                        self.colors.insert(self.fg);
                     }
                 }
                 39 => {
                     self.fg = 15;
+                    self.colors.insert(self.fg);
                 }
                 90..=97 => {
                     self.fg = (items[0][0] - 82) as u32;
+                    self.colors.insert(self.fg);
                 }
                 _ => {}
             }
@@ -101,6 +111,17 @@ fn is_box_char(data: &char) -> bool {
     match *data {
         '\u{2500}'..='\u{257F}' => true,
         _ => false,
+    }
+}
+
+fn write_color(lock: &mut io::StdoutLock<'static>, fg: u32) {
+    if fg < (1 << 31) {
+        write!(lock, "\x1b[38;5;{}m", fg).unwrap();
+    } else {
+        let r = ((fg >> 16) & 0xFF) as u8;
+        let g = ((fg >> 8) & 0xFF) as u8;
+        let b = ((fg) & 0xFF) as u8;
+        write!(lock, "\x1b[38;2;{};{};{}m", r, g, b).unwrap();
     }
 }
 
@@ -175,14 +196,7 @@ impl Grid {
                 let d = &self.data[y * self.width + x];
                 if fg != d.fg {
                     fg = d.fg;
-                    if fg < (1 << 31) {
-                        write!(lock, "\x1b[38;5;{}m", fg).unwrap();
-                    } else {
-                        let r = ((fg >> 16) & 0xFF) as u8;
-                        let g = ((fg >> 8) & 0xFF) as u8;
-                        let b = ((fg) & 0xFF) as u8;
-                        write!(lock, "\x1b[38;2;{};{};{}m", r, g, b).unwrap();
-                    }
+                    write_color(&mut lock, fg);
                 }
                 if d.c == '\0' && y < self.height - 1 {
                     execute!(lock, MoveToNextLine(1)).unwrap();
@@ -222,7 +236,6 @@ impl Grid {
 
 fn main() {
     let args = Args::parse();
-    println!("{:?}", args);
 
     let Some((w, h)) = term_size::dimensions() else {
         panic!("unable to get term dimensions");
@@ -236,6 +249,7 @@ fn main() {
         x: 0,
         y: 0,
         fg: 15,
+        colors: std::collections::HashSet::new(),
     };
 
     let mut buf = [0; 2048];
@@ -253,6 +267,18 @@ fn main() {
             }
         }
     }
+
+    if performer.grid.args.list_colors {
+        let mut lock = io::stdout().lock();
+        write!(lock, "Colors detected in input:\n").unwrap();
+        for color in performer.colors.iter() {
+            write_color(&mut lock, *color);
+            write!(lock, "  ***** {}\n", color).unwrap();
+        }
+        write!(lock, "\x1b[39m\n").unwrap();
+        return;
+    }
+
     execute!(io::stdout(), EnterAlternateScreen, Hide, MoveTo(0, 0)).unwrap();
     enable_raw_mode().unwrap();
     performer.grid.render();

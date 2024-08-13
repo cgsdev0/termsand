@@ -6,7 +6,11 @@ popup() {
   TMP="$(mktemp)"
   trap "rm $TMP" EXIT
   cat > "$TMP"
-  tmux display-popup -w $WIDTH -h $HEIGHT $* "cat \"$TMP\" | termsand $ARGS"
+  if [[ "$ARGS" == *"--list-colors" ]]; then
+    cat "$TMP" | termsand "$ARGS"
+  else
+    tmux display-popup -w $WIDTH -h $HEIGHT $* "cat \"$TMP\" | termsand $ARGS"
+  fi
 }
 
 PANE=$(tmux display -p "#{pane_id}")
