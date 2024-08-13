@@ -138,7 +138,7 @@ impl Grid {
                 return true;
             }
         }
-        !(self.is_empty(x, y) && self.args.color.contains(&self.data[y * self.width + x].fg))
+        !self.is_empty(x, y) && self.args.color.contains(&self.data[y * self.width + x].fg)
 
         // some colors from tokyonight-storm:
         //

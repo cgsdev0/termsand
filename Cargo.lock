@@ -399,7 +399,7 @@ dependencies = [
 
 [[package]]
 name = "termsand"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anstyle-parse",
  "clap",
