@@ -16,7 +16,7 @@ that said, here's some GIFs
 
 this thing is designed to work with tmux
 
-1. cargo install --git
+1. `cargo install --git https://github.com/cgsdev0/termsand`
 2. use [this bash script](https://gist.github.com/cgsdev0/c5fd87b0213992bd50194f315296dc98)
 3. bind it to a key in your `tmux.conf` like this:
 ```
