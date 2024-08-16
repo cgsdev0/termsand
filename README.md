@@ -21,6 +21,8 @@ and then maybe it will work
 
 good luck have fun
 
+![tmux_1](https://github.com/user-attachments/assets/42ade40d-b944-4e6c-9313-48a159045b1f)
+
 # More GIFs
 
 ![sand](https://github.com/user-attachments/assets/fbaa4c60-1f19-4795-9bee-2b7d9a2c23be)
