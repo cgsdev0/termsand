@@ -74,13 +74,19 @@ impl Perform for Performer {
         cell.c = c;
         cell.fg = self.fg;
         cell.bg = self.bg;
-        self.x += 1;
+        let mut width = UnicodeWidthChar::width(c).unwrap();
+        while width > 0 {
+            self.x += 1;
+            self.grid.get_mut(self.x, self.y).bg = self.bg;
+            width -= 1;
+        }
     }
 
     fn execute(&mut self, byte: u8) {
         if byte == 0x0a {
             self.grid.splat(self.x, self.y, self.bg);
             self.y += 1;
+            // self.bg = u32::MAX;
             self.x = 0;
         }
     }
