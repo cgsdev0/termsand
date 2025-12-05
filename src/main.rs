@@ -1,7 +1,7 @@
 //! Parse input from stdin and log actions on stdout
 use crossterm::{
     cursor::{Hide, MoveTo, MoveToNextLine, Show},
-    event::{self, Event, KeyEvent},
+    event::{self, Event, KeyCode, KeyEvent},
     execute,
     terminal::{
         disable_raw_mode, enable_raw_mode, BeginSynchronizedUpdate, EndSynchronizedUpdate,
@@ -13,7 +13,7 @@ use rand::seq::SliceRandom;
 use rand::Rng;
 
 use clap::Parser as ClapParser;
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use unicode_width::UnicodeWidthChar;
 
 use std::io::{self, Read, Write};
 
@@ -472,14 +472,10 @@ impl Grid {
     }
 }
 
-fn try_read_char() -> Option<char> {
+fn get_keycode() -> Option<KeyCode> {
     if event::poll(std::time::Duration::from_millis(0)).ok()? {
-        if let Event::Key(KeyEvent {
-            code: event::KeyCode::Char(c),
-            ..
-        }) = event::read().ok()?
-        {
-            return Some(c);
+        if let Ok(Event::Key(KeyEvent { code, .. })) = event::read() {
+            return Some(code);
         }
     }
     None
@@ -545,9 +541,15 @@ fn main() {
     performer.grid.render();
     if performer.grid.args.snow {
         loop {
-            if let Some(character) = try_read_char() {
-                if character == 'q' {
-                    break;
+            if let Some(keycode) = get_keycode() {
+                match keycode {
+                    KeyCode::Char(c) => {
+                        if c == 'q' {
+                            break;
+                        }
+                    }
+                    KeyCode::Esc => break,
+                    _ => {}
                 }
             }
             let grid = &mut performer.grid;
