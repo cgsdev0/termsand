@@ -78,6 +78,9 @@ impl Perform for Performer {
 
     fn execute(&mut self, byte: u8) {
         if byte == 0x0a {
+            if self.x > 0 {
+                let prev = self.grid.splat(self.x, self.y);
+            }
             self.y += 1;
             self.x = 0;
         }
@@ -141,6 +144,10 @@ impl Perform for Performer {
                 90..=97 => {
                     self.fg = (items[0][0] - 82) as u32;
                     self.colors.insert(self.fg);
+                }
+                100..=107 => {
+                    self.bg = (items[0][0] - 92) as u32;
+                    self.bg_colors.insert(self.bg);
                 }
                 _ => {}
             }
@@ -301,6 +308,15 @@ impl Grid {
         }
     }
 
+    fn splat(&mut self, x: usize, y: usize) {
+        // smear the background to the end of the row
+        let prev_bg = self.data[y * self.width + x - 1].bg;
+        let mut i = x;
+        while i < self.width {
+            self.get_mut(i, y).bg = prev_bg;
+            i += 1;
+        }
+    }
     fn get_mut(&mut self, x: usize, y: usize) -> &mut Cell {
         &mut self.data[y * self.width + x]
     }
