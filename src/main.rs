@@ -78,9 +78,7 @@ impl Perform for Performer {
 
     fn execute(&mut self, byte: u8) {
         if byte == 0x0a {
-            if self.x > 0 {
-                let prev = self.grid.splat(self.x, self.y);
-            }
+            self.grid.splat(self.x, self.y, self.bg);
             self.y += 1;
             self.x = 0;
         }
@@ -308,12 +306,14 @@ impl Grid {
         }
     }
 
-    fn splat(&mut self, x: usize, y: usize) {
+    fn splat(&mut self, x: usize, y: usize, bg: u32) {
         // smear the background to the end of the row
-        let prev_bg = self.data[y * self.width + x - 1].bg;
+        if x == 0 && y == 0 || bg == u32::MAX {
+            return;
+        }
         let mut i = x;
         while i < self.width {
-            self.get_mut(i, y).bg = prev_bg;
+            self.get_mut(i, y).bg = bg;
             i += 1;
         }
     }
@@ -491,7 +491,7 @@ fn main() {
         x: 0,
         y: 0,
         fg: 15,
-        bg: 0,
+        bg: u32::MAX,
         colors: std::collections::HashSet::new(),
         bg_colors: std::collections::HashSet::new(),
     };
