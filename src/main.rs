@@ -515,9 +515,17 @@ impl Grid {
 
             if self.is_empty(x, y) && !self.is_static(x, y) {
                 self.swap(x, y, dx, dy);
-            } else if rand_choice < 0.5 && check1 && self.is_empty(x - ax, y + ay) {
+            } else if rand_choice < 0.5
+                && check1
+                && self.is_empty(x - ax, y + ay)
+                && !self.is_static(x - ax, y + ay)
+            {
                 self.swap(x - ax, y - ay, dx, dy);
-            } else if rand_choice >= 0.5 && check2 && self.is_empty(x + ax, y + ay) {
+            } else if rand_choice >= 0.5
+                && check2
+                && self.is_empty(x + ax, y + ay)
+                && !self.is_static(x + ax, y + ay)
+            {
                 self.swap(x + ax, y + ay, dx, dy);
             }
         }
