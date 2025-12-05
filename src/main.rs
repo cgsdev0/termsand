@@ -13,6 +13,7 @@ use rand::seq::SliceRandom;
 use rand::Rng;
 
 use clap::Parser as ClapParser;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use std::io::{self, Read, Write};
 
@@ -301,7 +302,7 @@ impl Grid {
                 height: h,
                 data: vec![Snowflake { c: ' ' }; w * h].into_boxed_slice(),
                 flip: 0,
-                flip_rate: 2,
+                flip_rate: 3,
             },
         }
     }
@@ -386,7 +387,12 @@ impl Grid {
         let mut bg = 0;
         let mut lock = io::stdout().lock();
         for y in 0..self.height {
+            let mut skip = 0;
             for x in 0..self.width {
+                if skip > 0 {
+                    skip -= 1;
+                    continue;
+                }
                 let d = &self.data[y * self.width + x];
                 let snow_fg = self.snow_fg.get(x, y);
                 let snow_bg = self.snow_bg.get(x, y);
@@ -414,6 +420,12 @@ impl Grid {
                         write!(lock, "{}", snow_bg.unwrap()).unwrap();
                     } else {
                         write!(lock, "{}", d.c).unwrap();
+                        let width = UnicodeWidthChar::width(d.c);
+                        if let Some(width) = width {
+                            if width > 1 {
+                                skip = width - 1;
+                            }
+                        }
                     }
                 }
             }

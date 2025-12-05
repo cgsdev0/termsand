@@ -432,6 +432,7 @@ dependencies = [
  "crossterm",
  "rand",
  "term_size",
+ "unicode-width",
 ]
 
 [[package]]
