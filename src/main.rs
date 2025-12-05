@@ -49,6 +49,19 @@ struct Args {
     /// Enable snow effect
     #[arg(long)]
     snow: bool,
+
+    /// Enable blender effect
+    #[arg(long, default_value_t = 0)]
+    blender: usize,
+
+    /// How many milliseconds to sleep for
+    #[arg(long, default_value_t = 30)]
+    ms: u64,
+}
+
+struct Vec2 {
+    x: isize,
+    y: isize,
 }
 
 /// This thing parses the initial input using anstyle-parse
@@ -352,6 +365,9 @@ impl Grid {
         std::mem::swap(&mut a.bg, &mut b.bg);
     }
     fn is_static(&self, x: usize, y: usize) -> bool {
+        if x >= self.width || y >= self.height {
+            return false;
+        }
         if self.args.borders {
             if is_box_char(&self.data[y * self.width + x].c) {
                 return true;
@@ -377,10 +393,13 @@ impl Grid {
     }
 
     fn is_sand(&self, x: usize, y: usize) -> bool {
-        !self.is_empty(x, y) && !self.is_static(x, y)
+        y < self.height && x < self.width && !self.is_empty(x, y) && !self.is_static(x, y)
     }
 
     fn is_empty(&self, x: usize, y: usize) -> bool {
+        if x >= self.width || y >= self.height {
+            return false;
+        }
         let cell = &self.data[y * self.width + x];
         if cell.c == '\0' || cell.c == ' ' {
             return true;
@@ -438,41 +457,68 @@ impl Grid {
         }
         execute!(lock, MoveTo(0, 0)).unwrap();
     }
-    fn step(&mut self) {
-        if self.args.snow {
-            self.snow_fg.step(&self.args);
-            self.snow_bg.step(&self.args);
-        } else {
-            let range: Box<dyn Iterator<Item = usize>> = match self.args.antigravity {
-                true => Box::new(0..self.height - 1),
-                false => Box::new((1..self.height).rev()),
-            };
-            for y in range {
-                let delta: usize = match self.args.antigravity {
-                    true => y + 1,
-                    false => y - 1,
-                };
-                for x in 0..self.width {
-                    if self.is_sand(x, delta) {
-                        let rand_choice = rand::random::<f32>();
 
-                        if self.is_empty(x, y) && !self.is_static(x, y) {
-                            self.swap(x, y, x, delta);
-                        } else if rand_choice < 0.5
-                            && x > 0
-                            && self.is_empty(x - 1, y)
-                            && !self.is_static(x - 1, y)
-                        {
-                            self.swap(x - 1, y, x, delta);
-                        } else if rand_choice >= 0.5
-                            && x < self.width - 1
-                            && self.is_empty(x + 1, y)
-                            && !self.is_static(x + 1, y)
-                        {
-                            self.swap(x + 1, y, x, delta);
-                        }
-                    }
+    fn snow_step(&mut self) {
+        self.snow_fg.step(&self.args);
+        self.snow_bg.step(&self.args);
+    }
+
+    fn step(&mut self, dir: &Vec2) {
+        let yrange: Box<dyn Iterator<Item = usize>> = match dir.y {
+            -1 => Box::new((1..self.height).rev()),
+            _ => Box::new(0..self.height - 1),
+        };
+        let xrange: Box<dyn Iterator<Item = usize>> = match dir.x {
+            -1 => Box::new((1..self.width).rev()),
+            _ => Box::new(0..self.width - 1),
+        };
+        if dir.x == 0 {
+            for y in yrange {
+                for x in 0..self.width {
+                    self.step_single(
+                        x,
+                        y,
+                        (x as isize + dir.x) as usize,
+                        (y as isize + dir.y) as usize,
+                        &dir,
+                    );
                 }
+            }
+        } else {
+            for x in xrange {
+                for y in 0..self.height {
+                    self.step_single(
+                        x,
+                        y,
+                        (x as isize + dir.x) as usize,
+                        (y as isize + dir.y) as usize,
+                        &dir,
+                    );
+                }
+            }
+        }
+    }
+
+    fn step_single(&mut self, x: usize, y: usize, dx: usize, dy: usize, dir: &Vec2) {
+        if self.is_sand(dx, dy) {
+            let rand_choice = rand::random::<f32>();
+
+            let ax = if dir.x == 0 { 1 } else { 0 };
+            let ay = if dir.y == 0 { 1 } else { 0 };
+
+            let check1 = if dir.x == 0 { x > 0 } else { y > 0 };
+            let check2 = if dir.x == 0 {
+                x < self.width - 1
+            } else {
+                y < self.height - 1
+            };
+
+            if self.is_empty(x, y) && !self.is_static(x, y) {
+                self.swap(x, y, dx, dy);
+            } else if rand_choice < 0.5 && check1 && self.is_empty(x - ax, y + ay) {
+                self.swap(x - ax, y - ay, dx, dy);
+            } else if rand_choice >= 0.5 && check2 && self.is_empty(x + ax, y + ay) {
+                self.swap(x + ax, y + ay, dx, dy);
             }
         }
     }
@@ -559,7 +605,7 @@ fn main() {
                 }
             }
             let grid = &mut performer.grid;
-            grid.step();
+            grid.snow_step();
             execute!(io::stdout(), MoveTo(0, 0), BeginSynchronizedUpdate).unwrap();
             performer.grid.render();
             execute!(io::stdout(), EndSynchronizedUpdate).unwrap();
@@ -567,14 +613,43 @@ fn main() {
         }
     } else {
         std::thread::sleep(std::time::Duration::from_millis(400));
-        for _ in 0..150 {
+        let cycles = performer.grid.args.blender;
+        let antigravity = performer.grid.args.antigravity;
+        let mut run_step = |dir: &Vec2| {
             let grid = &mut performer.grid;
-            grid.step();
+            grid.step(&dir);
             execute!(io::stdout(), MoveTo(0, 0), BeginSynchronizedUpdate).unwrap();
             let grid = &performer.grid;
             grid.render();
             execute!(io::stdout(), EndSynchronizedUpdate).unwrap();
-            std::thread::sleep(std::time::Duration::from_millis(30));
+            std::thread::sleep(std::time::Duration::from_millis(grid.args.ms));
+        };
+
+        // activate blender mode
+        if cycles > 0 {
+            let dirs = vec![
+                Vec2 { x: -1, y: 0 },
+                Vec2 { x: 0, y: -1 },
+                Vec2 { x: 1, y: 0 },
+                Vec2 { x: 0, y: 1 },
+            ];
+            for i in 0..(4 * cycles) {
+                let dir = &dirs[i % 4];
+                let iters = if dir.x == 0 { h * 2 / 3 } else { w * 2 / 3 };
+                for _ in 0..iters {
+                    run_step(&dir);
+                }
+            }
+        } else {
+            // normal sand sim
+            let dir = if antigravity {
+                Vec2 { x: 0, y: 1 }
+            } else {
+                Vec2 { x: 0, y: -1 }
+            };
+            for _ in 0..150 {
+                run_step(&dir);
+            }
         }
     }
     disable_raw_mode().unwrap();
