@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 ARGS="$@"
 
@@ -21,6 +21,6 @@ WIDTH="${DIMENSIONS%x*}"
 Y="${POSITION#*x}"
 ((Y+=HEIGHT+1))
 X="${POSITION%x*}"
-STUFF="$(tmux capture-pane -p -e -t "$PANE")"
+STUFF="$(tmux capture-pane -p -e -t "$PANE" -C)"
 echo -e "$STUFF" \
-  | popup -E -B -y$Y -x$X -w $WIDTH -h $HEIGHT
+  | popup -B -y $Y -x $X -w $WIDTH -h $HEIGHT
