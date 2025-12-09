@@ -15,7 +15,10 @@ use rand::Rng;
 use clap::Parser as ClapParser;
 use unicode_width::UnicodeWidthChar;
 
-use std::io::{self, Read, Write};
+use std::{
+    io::{self, Read, Write},
+    u32
+};
 
 use anstyle_parse::{DefaultCharAccumulator, Params, Parser, Perform};
 
@@ -50,18 +53,109 @@ struct Args {
     #[arg(long)]
     snow: bool,
 
+    /// Make static characters "sticky," sand won't fall off directly (subtle)
+    #[arg(short = 'e', long)]
+    edge_stick: bool,
+
+    /// Stickiness level, less results in short hills, more for tall towers.
+    #[arg(short = 't', long, default_value_t = 0)]
+    stickiness: usize,
+
     /// Enable blender effect
-    #[arg(long, default_value_t = 0)]
-    blender: usize,
+    #[arg(long, group = "effect")]
+    blender: bool,
+
+    /// A series of assorted gravity changes.
+    #[arg(long, group = "effect")]
+    tilt_shift: bool,
+
+    /// How many times to repeat cycling effects (0 infinite loop: q or esc to quit)
+    #[arg(long, default_value_t = 1)]
+    cycles: usize,
 
     /// How many milliseconds to sleep for
     #[arg(long, default_value_t = 30)]
     ms: u64,
+
+    /// How many simulation steps when simulating vertically
+    #[arg(long, default_value_t = 150)]
+    v_time: usize,
+
+    /// How many simulation steps when simulating horizontally
+    #[arg(long, default_value_t = 250)]
+    h_time: usize,
+
 }
 
+#[derive(Debug, Clone)]
+struct Maybe<T>(Option<T>);
+impl<'a> From<&'a str> for Maybe<usize> {
+    fn from(value: &'a str) -> Self {
+        Self(value.parse().ok())
+    }
+}
+impl<T> std::fmt::Display for Maybe<T> where T: std::fmt::Display {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Maybe(Some(value)) => value.fmt(f),
+            Maybe(None) => Ok(()),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
 struct Vec2 {
     x: isize,
     y: isize,
+}
+
+impl core::ops::Add<Vec2> for Vec2 {
+    type Output = Self;
+
+    fn add(self, rhs: Vec2) -> Self {
+        Self { x: self.x + rhs.x, y: self.y + rhs.y }
+    }
+}
+impl core::ops::Sub<Vec2> for Vec2 {
+    type Output = Self;
+
+    fn sub(self, rhs: Vec2) -> Self {
+        Self { x: self.x - rhs.x, y: self.y - rhs.y }
+    }
+}
+impl core::ops::Add<&Vec2> for Vec2 {
+    type Output = Vec2;
+
+    fn add(self, rhs: &Vec2) -> Self::Output {
+        Vec2 { x: self.x + rhs.x, y: self.y + rhs.y }
+    }
+}
+impl core::ops::Sub<&Vec2> for Vec2 {
+    type Output = Vec2;
+
+    fn sub(self, rhs: &Vec2) -> Self::Output {
+        Vec2 { x: self.x - rhs.x, y: self.y - rhs.y }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Underline {
+    Off = 0,
+    Single = 1,
+    Double = 2,
+    Curly = 3,
+    Dotted = 4,
+    Dashed = 5,
+}
+impl Default for Underline {
+    fn default() -> Self { Self::Off }
+}
+
+#[derive(Default, Clone)]
+struct CellStyle {
+    italic: bool,
+    bold: bool,
+    underline: Underline,
 }
 
 /// This thing parses the initial input using anstyle-parse
@@ -71,6 +165,8 @@ struct Performer {
     y: usize,
     fg: u32,
     bg: u32,
+    ul_color: u32,
+    style: CellStyle,
     colors: std::collections::HashSet<u32>,
     bg_colors: std::collections::HashSet<u32>,
 }
@@ -83,10 +179,13 @@ impl Perform for Performer {
         if self.y >= self.grid.height {
             return;
         }
-        let cell = self.grid.get_mut(self.x, self.y);
-        cell.c = c;
-        cell.fg = self.fg;
-        cell.bg = self.bg;
+        *self.grid.get_mut(self.x, self.y) = Cell {
+            c,
+            fg: self.fg,
+            bg: self.bg,
+            ul_color: self.ul_color,
+            style: self.style.clone(),
+        };
         let mut width = UnicodeWidthChar::width(c).unwrap();
         while width > 0 {
             self.x += 1;
@@ -105,10 +204,6 @@ impl Perform for Performer {
     }
 
     fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8], ignore: bool, c: u8) {
-        // println!(
-        //     "[csi_dispatch] params={:#?}, intermediates={:?}, ignore={:?}, char={:?}",
-        //     params, intermediates, ignore, c
-        // );
         //
         // if c != b'm' {
         //     return;
@@ -117,10 +212,33 @@ impl Perform for Performer {
         {
             match items[0][0] {
                 0 => {
-                    self.fg = 15;
+                    self.fg = u32::MAX;
                     self.bg = u32::MAX;
+                    self.ul_color = u32::MAX;
                     self.colors.insert(self.fg);
+                    self.style = CellStyle::default();
                 }
+                1 => { self.style.bold = true; }
+                3 => { self.style.italic = true; }
+                4 => {
+                    self.ul_color = u32::MAX;
+                    if items[0].len() == 1 {
+                        self.style.underline = Underline::Single;
+                    } else if items[0].len() == 2 {
+                        self.style.underline = match items[0][1] {
+                            0 => Underline::Off,
+                            1 => Underline::Single,
+                            2 => Underline::Double,
+                            3 => Underline::Curly,
+                            4 => Underline::Dotted,
+                            5 => Underline::Dashed,
+                            _ => Underline::Off,
+                        };
+                    }
+                }
+                24 => { self.style.underline = Underline::Off; }
+                22 => { self.style.bold = false; }
+                23 => { self.style.italic = false; }
                 30..=37 => {
                     self.fg = (items[0][0] - 30) as u32;
                     self.colors.insert(self.fg);
@@ -138,7 +256,7 @@ impl Perform for Performer {
                     }
                 }
                 39 => {
-                    self.fg = 15;
+                    self.fg = u32::MAX;
                     self.colors.insert(self.fg);
                 }
                 40..=47 => {
@@ -159,6 +277,19 @@ impl Perform for Performer {
                 49 => {
                     self.bg = u32::MAX;
                 }
+                58 => {
+                    if items[1][0] == 5 {
+                        self.ul_color = items[2][0] as u32;
+                    } else if items[1][0] == 2 {
+                        self.ul_color = (1 << 31)
+                            ^ ((items[2][0] as u32) << 16)
+                            ^ ((items[3][0] as u32) << 8)
+                            ^ (items[4][0] as u32);
+                    }
+                }
+                59 => {
+                    self.ul_color = u32::MAX;
+                }
                 90..=97 => {
                     self.fg = (items[0][0] - 82) as u32;
                     self.colors.insert(self.fg);
@@ -167,7 +298,12 @@ impl Perform for Performer {
                     self.bg = (items[0][0] - 92) as u32;
                     self.bg_colors.insert(self.bg);
                 }
-                _ => {}
+                _ => {
+                    // println!(
+                    //     "[csi_dispatch] params={:#?}, intermediates={:?}, ignore={:?}, char={:?}",
+                    //     params, intermediates, ignore, c
+                    // );
+                }
             }
         }
     }
@@ -177,13 +313,16 @@ impl Perform for Performer {
 struct Cell {
     fg: u32,
     bg: u32,
+    ul_color: u32,
     c: char,
+    style: CellStyle,
 }
 struct Grid {
     width: usize,
     height: usize,
     data: Box<[Cell]>,
     args: Args,
+    stickiness: f32,
     snow_fg: SnowGrid,
     snow_bg: SnowGrid,
 }
@@ -200,16 +339,21 @@ struct SnowGrid {
     flip_rate: usize,
 }
 
-fn is_box_char(data: &char) -> bool {
-    match *data {
-        '\u{2500}'..='\u{257F}' => true,
-        _ => false,
+impl Cell {
+    fn is_box_char(&self) -> bool {
+        match self.c {
+            '\u{2500}'..='\u{257F}' => true,
+            _ => false,
+        }
+    }
+    fn is_empty(&self) -> bool {
+        self.c == '\0' || self.c == ' '
     }
 }
 
 fn write_bg_color(lock: &mut io::StdoutLock<'static>, bg: u32) {
     if bg == u32::MAX {
-        write!(lock, "\x1b[49;m").unwrap();
+        write!(lock, "\x1b[49m").unwrap();
     } else if bg < (1 << 31) {
         write!(lock, "\x1b[48;5;{}m", bg).unwrap();
     } else {
@@ -220,13 +364,27 @@ fn write_bg_color(lock: &mut io::StdoutLock<'static>, bg: u32) {
     }
 }
 fn write_color(lock: &mut io::StdoutLock<'static>, fg: u32) {
-    if fg < (1 << 31) {
+    if fg == u32::MAX {
+        write!(lock, "\x1b[39m").unwrap();
+    } else if fg < (1 << 31) {
         write!(lock, "\x1b[38;5;{}m", fg).unwrap();
     } else {
         let r = ((fg >> 16) & 0xFF) as u8;
         let g = ((fg >> 8) & 0xFF) as u8;
         let b = ((fg) & 0xFF) as u8;
         write!(lock, "\x1b[38;2;{};{};{}m", r, g, b).unwrap();
+    }
+}
+fn write_ul_color(lock: &mut io::StdoutLock<'static>, ul: u32) {
+    if ul == u32::MAX {
+        write!(lock, "\x1b[59m").unwrap();
+    } else if ul < (1 << 31) {
+        write!(lock, "\x1b[58;5;{}m", ul).unwrap();
+    } else {
+        let r = ((ul >> 16) & 0xFF) as u8;
+        let g = ((ul >> 8) & 0xFF) as u8;
+        let b = ((ul) & 0xFF) as u8;
+        write!(lock, "\x1b[58;2;{};{};{}m", r, g, b).unwrap();
     }
 }
 
@@ -296,15 +454,19 @@ impl SnowGrid {
 }
 impl Grid {
     fn new(args: Args, w: usize, h: usize) -> Self {
+        let stickiness = 0.5 / (args.stickiness as f32).max(1.0);
         Grid {
             args,
             width: w,
             height: h,
+            stickiness,
             data: vec![
                 Cell {
-                    fg: 0,
+                    fg: u32::MAX,
                     bg: u32::MAX,
-                    c: ' '
+                    ul_color: u32::MAX,
+                    style: CellStyle::default(),
+                    c: ' ',
                 };
                 w * h
             ]
@@ -337,13 +499,18 @@ impl Grid {
             i += 1;
         }
     }
+    fn get(&self, pos: Vec2) -> Option<&Cell> {
+        if pos.x < 0 || pos.x >= self.width as isize
+            || pos.y < 0 || pos.y >= self.height as isize { return None }
+        Some(&self.data[pos.y as usize * self.width + pos.x as usize])
+    }
     fn get_mut(&mut self, x: usize, y: usize) -> &mut Cell {
         &mut self.data[y * self.width + x]
     }
 
-    fn swap(&mut self, x1: usize, y1: usize, x2: usize, y2: usize) {
-        let idx1 = y1 * self.width + x1;
-        let idx2 = y2 * self.width + x2;
+    fn swap(&mut self, pos1: Vec2, pos2: Vec2) {
+        let idx1 = pos1.y as usize * self.width + pos1.x as usize;
+        let idx2 = pos2.y as usize * self.width + pos2.x as usize;
 
         self.data.swap(idx1, idx2);
         let (a, b) = if idx1 < idx2 {
@@ -364,18 +531,11 @@ impl Grid {
         // swap backgrounds
         std::mem::swap(&mut a.bg, &mut b.bg);
     }
-    fn is_static(&self, x: usize, y: usize) -> bool {
-        if x >= self.width || y >= self.height {
-            return false;
-        }
-        if self.args.borders {
-            if is_box_char(&self.data[y * self.width + x].c) {
-                return true;
-            }
-        }
-        let fg = self.data[y * self.width + x].fg;
-        let bg = self.data[y * self.width + x].bg;
-        !self.is_empty(x, y) && (self.args.color.contains(&fg) || self.args.bg.contains(&bg))
+    fn is_static(&self, cell: &Cell) -> bool {
+        (self.args.borders && cell.is_box_char())
+        || (!cell.is_empty() && (
+            self.args.color.contains(&cell.fg) || self.args.bg.contains(&cell.bg)
+        ))
 
         // some colors from tokyonight-storm:
         //
@@ -392,24 +552,15 @@ impl Grid {
         // comments: 2153144201
     }
 
-    fn is_sand(&self, x: usize, y: usize) -> bool {
-        y < self.height && x < self.width && !self.is_empty(x, y) && !self.is_static(x, y)
-    }
-
-    fn is_empty(&self, x: usize, y: usize) -> bool {
-        if x >= self.width || y >= self.height {
-            return false;
-        }
-        let cell = &self.data[y * self.width + x];
-        if cell.c == '\0' || cell.c == ' ' {
-            return true;
-        }
-        return false;
+    fn is_sand(&self, cell: &Cell) -> bool {
+        !cell.is_empty() && !self.is_static(cell)
     }
 
     fn render(&self) {
-        let mut fg = 0;
-        let mut bg = 0;
+        let mut fg = u32::MAX;
+        let mut bg = u32::MAX;
+        let mut ul = u32::MAX;
+        let mut style = CellStyle::default();
         let mut lock = io::stdout().lock();
         for y in 0..self.height {
             let mut skip = 0;
@@ -421,6 +572,32 @@ impl Grid {
                 let d = &self.data[y * self.width + x];
                 let snow_fg = self.snow_fg.get(x, y);
                 let snow_bg = self.snow_bg.get(x, y);
+                if style.italic != d.style.italic {
+                    style.italic = d.style.italic;
+                    if style.italic {
+                        write!(lock, "\x1b[3m").unwrap();
+                    } else {
+                        write!(lock, "\x1b[23m").unwrap();
+                    }
+                }
+                if style.bold != d.style.bold {
+                    style.bold = d.style.bold;
+                    if style.bold {
+                        write!(lock, "\x1b[1m").unwrap();
+                    } else {
+                        write!(lock, "\x1b[22m").unwrap();
+                    }
+                }
+                if style.underline != d.style.underline {
+                    style.underline = d.style.underline;
+                    write!(lock, "\x1b[4:{}m", style.underline as u32).unwrap();
+                    ul = u32::MAX;
+                }
+                if let Underline::Off = d.style.underline {
+                } else if ul != d.ul_color {
+                    write_ul_color(&mut lock, d.ul_color);
+                    ul = d.ul_color;
+                }
                 if snow_fg.is_some() || (snow_bg.is_some() && d.c == ' ') {
                     if fg != 15 {
                         fg = 15;
@@ -444,12 +621,18 @@ impl Grid {
                     if d.c == ' ' && snow_bg.is_some() {
                         write!(lock, "{}", snow_bg.unwrap()).unwrap();
                     } else {
-                        write!(lock, "{}", d.c).unwrap();
                         let width = UnicodeWidthChar::width(d.c);
                         if let Some(width) = width {
                             if width > 1 {
                                 skip = width - 1;
                             }
+                            if x + width <= self.width {
+                                write!(lock, "{}", d.c).unwrap();
+                            } else {
+                                write!(lock, " ").unwrap();
+                            }
+                        } else {
+                            write!(lock, "{}", d.c).unwrap();
                         }
                     }
                 }
@@ -465,8 +648,8 @@ impl Grid {
 
     fn step(&mut self, dir: &Vec2) {
         let yrange: Box<dyn Iterator<Item = usize>> = match dir.y {
-            -1 => Box::new((1..self.height).rev()),
-            _ => Box::new(0..self.height - 1),
+            -1 => Box::new((1..self.height).rev()), // down (process from bottom up)
+            _ => Box::new(0..self.height - 1), // up
         };
         let xrange: Box<dyn Iterator<Item = usize>> = match dir.x {
             -1 => Box::new((1..self.width).rev()),
@@ -475,59 +658,125 @@ impl Grid {
         if dir.x == 0 {
             for y in yrange {
                 for x in 0..self.width {
-                    self.step_single(
-                        x,
-                        y,
-                        (x as isize + dir.x) as usize,
-                        (y as isize + dir.y) as usize,
-                        &dir,
-                    );
+                    let pos = Vec2{x: x as isize, y: y as isize};
+                    let up = pos + dir;
+                    let dir_right = Vec2 {
+                        x: -dir.y,
+                        y: dir.x,
+                    };
+                    self.step_collapse(pos, up, dir_right);
+                    self.step_fall(pos, up);
                 }
+                // for x in 0..self.width {
+                //     let pos = Vec2 { x: x as isize, y: y as isize };
+                //     let up = pos + dir;
+                //     let dir_right = Vec2 {
+                //         x: -dir.y,
+                //         y: dir.x,
+                //     };
+                //     self.step_slide(pos, up, dir_right);
+                // }
             }
         } else {
             for x in xrange {
+                // everything that can fall, will fall
                 for y in 0..self.height {
-                    self.step_single(
-                        x,
-                        y,
-                        (x as isize + dir.x) as usize,
-                        (y as isize + dir.y) as usize,
-                        &dir,
-                    );
+                    let pos = Vec2{x: x as isize, y: y as isize};
+                    let up = pos + dir;
+                    let dir_right = Vec2 {
+                        x: -dir.y,
+                        y: dir.x,
+                    };
+                    self.step_collapse(pos, up, dir_right);
+                    self.step_fall(pos, up);
                 }
+                // everything that might slide, should slide
+                // for y in 0..self.height {
+                //     let pos = Vec2 { x: x as isize, y: y as isize };
+                //     let up = pos + dir;
+                //     let dir_right = Vec2 {
+                //         x: -dir.y,
+                //         y: dir.x,
+                //     };
+                //     self.step_slide(pos, up, dir_right);
+                // }
             }
         }
     }
 
-    fn step_single(&mut self, x: usize, y: usize, dx: usize, dy: usize, dir: &Vec2) {
-        if self.is_sand(dx, dy) {
-            let rand_choice = rand::random::<f32>();
+    fn step_fall(&mut self, pos: Vec2, up: Vec2) {
+        let Some(current) = self.get(pos) else { return };
+        let Some(cell_up) = self.get(up) else { return };
+        if !self.is_sand(cell_up) {
+            return
+        }
+        if current.is_empty() && !self.is_static(cell_up) {
+            self.swap(pos, up);
+        }
+    }
+    fn step_slide(&mut self, pos: Vec2, up: Vec2, dir_right: Vec2) {
+        let Some(current) = self.get(pos) else { return };
+        let Some(up_cell) = self.get(up) else { return };
+        if !self.is_sand(up_cell) {
+            return
+        }
+        let rand_choice = rand::random::<f32>();
 
-            let ax = if dir.x == 0 { 1 } else { 0 };
-            let ay = if dir.y == 0 { 1 } else { 0 };
-
-            let check1 = if dir.x == 0 { x > 0 } else { y > 0 };
-            let check2 = if dir.x == 0 {
-                x < self.width - 1
+        let left = pos - dir_right;
+        let right = pos + dir_right;
+        let cell_left = self.get(left);
+        let cell_right = self.get(right);
+        let left_valid = if let Some(cell_left) = cell_left {
+            cell_left.is_empty() && !self.is_static(cell_left)
+        } else { false };
+        let right_valid = if let Some(cell_right) = cell_right {
+            cell_right.is_empty()
+            && !self.is_static(cell_right)
+        } else { false };
+        // do the swaps
+        if left_valid {
+            if right_valid && rand_choice > 0.5 {
+                self.swap(right, up);
             } else {
-                y < self.height - 1
-            };
-
-            if self.is_empty(x, y) && !self.is_static(x, y) {
-                self.swap(x, y, dx, dy);
-            } else if rand_choice < 0.5
-                && check1
-                && self.is_empty(x - ax, y - ay)
-                && !self.is_static(x - ax, y - ay)
-            {
-                self.swap(x - ax, y - ay, dx, dy);
-            } else if rand_choice >= 0.5
-                && check2
-                && self.is_empty(x + ax, y + ay)
-                && !self.is_static(x + ax, y + ay)
-            {
-                self.swap(x + ax, y + ay, dx, dy);
+                self.swap(left, up);
             }
+        } else if right_valid {
+            self.swap(right, up);
+        }
+    }
+    fn step_collapse(&mut self, pos: Vec2, up: Vec2, dir_right: Vec2) {
+        let Some(current) = self.get(pos) else { return };
+        let Some(up_cell) = self.get(up) else { return };
+        if !current.is_empty() {
+            return
+        }
+        let rand_choice = rand::random::<f32>();
+
+        let cell_left = self.get(pos - dir_right);
+        let cell_right = self.get(pos + dir_right);
+        let cell_up_left = self.get(up - dir_right);
+        let cell_up_right = self.get(up + dir_right);
+        let left_valid = if let (Some(cell_left), Some(cell_up_left)) = (cell_left, cell_up_left) {
+            !cell_left.is_empty()
+                && !self.is_static(up_cell)
+                && (!self.args.edge_stick || !self.is_static(cell_left))
+                && self.is_sand(cell_up_left)
+        } else { false };
+        let right_valid = if let (Some(cell_right), Some(cell_up_right)) = (cell_right, cell_up_right) {
+            !cell_right.is_empty()
+                && !self.is_static(up_cell)
+                && (!self.args.edge_stick || !self.is_static(cell_right))
+                && self.is_sand(cell_up_right)
+        } else { false };
+        // do the swaps
+        if left_valid {
+            if right_valid && rand_choice > (1.0 - self.stickiness) {
+                self.swap(up + dir_right, pos);
+            } else if rand_choice < self.stickiness {
+                self.swap(up - dir_right, pos);
+            }
+        } else if right_valid && rand_choice > (1.0 - self.stickiness) {
+            self.swap(up + dir_right, pos);
         }
     }
 }
@@ -539,6 +788,17 @@ fn get_keycode() -> Option<KeyCode> {
         }
     }
     None
+}
+
+fn check_quit() -> bool {
+    let Some(keycode) = get_keycode() else {
+        return false
+    };
+    match keycode {
+        KeyCode::Char('q') => true,
+        KeyCode::Esc => true,
+        _ => false
+    }
 }
 
 fn main() {
@@ -558,8 +818,10 @@ fn main() {
         grid: Grid::new(args, w, h),
         x: 0,
         y: 0,
-        fg: 15,
+        fg: u32::MAX,
         bg: u32::MAX,
+        ul_color: u32::MAX,
+        style: CellStyle::default(),
         colors: std::collections::HashSet::new(),
         bg_colors: std::collections::HashSet::new(),
     };
@@ -598,65 +860,87 @@ fn main() {
 
     execute!(io::stdout(), EnterAlternateScreen, Hide, MoveTo(0, 0)).unwrap();
     enable_raw_mode().unwrap();
-    performer.grid.render();
-    if performer.grid.args.snow {
-        loop {
-            if let Some(keycode) = get_keycode() {
-                match keycode {
-                    KeyCode::Char(c) => {
-                        if c == 'q' {
-                            break;
-                        }
-                    }
-                    KeyCode::Esc => break,
-                    _ => {}
-                }
-            }
-            let grid = &mut performer.grid;
-            grid.snow_step();
-            execute!(io::stdout(), MoveTo(0, 0), BeginSynchronizedUpdate).unwrap();
-            performer.grid.render();
-            execute!(io::stdout(), EndSynchronizedUpdate).unwrap();
-            std::thread::sleep(std::time::Duration::from_millis(250));
-        }
-    } else {
-        std::thread::sleep(std::time::Duration::from_millis(400));
-        let cycles = performer.grid.args.blender;
-        let antigravity = performer.grid.args.antigravity;
-        let mut run_step = |dir: &Vec2| {
-            let grid = &mut performer.grid;
-            grid.step(&dir);
-            execute!(io::stdout(), MoveTo(0, 0), BeginSynchronizedUpdate).unwrap();
-            let grid = &performer.grid;
-            grid.render();
-            execute!(io::stdout(), EndSynchronizedUpdate).unwrap();
-            std::thread::sleep(std::time::Duration::from_millis(grid.args.ms));
-        };
-
-        // activate blender mode
-        if cycles > 0 {
-            let dirs = vec![
-                Vec2 { x: -1, y: 0 },
-                Vec2 { x: 0, y: -1 },
-                Vec2 { x: 1, y: 0 },
-                Vec2 { x: 0, y: 1 },
-            ];
-            for i in 0..(4 * cycles) {
-                let dir = &dirs[i % 4];
-                let iters = if dir.x == 0 { h * 2 / 3 } else { w * 2 / 3 };
-                for _ in 0..iters {
-                    run_step(&dir);
-                }
+    'done: {
+        performer.grid.render();
+        if performer.grid.args.snow {
+            loop {
+                if check_quit() { break }
+                let grid = &mut performer.grid;
+                grid.snow_step();
+                execute!(io::stdout(), MoveTo(0, 0), BeginSynchronizedUpdate).unwrap();
+                performer.grid.render();
+                execute!(io::stdout(), EndSynchronizedUpdate).unwrap();
+                std::thread::sleep(std::time::Duration::from_millis(250));
             }
         } else {
-            // normal sand sim
-            let dir = if antigravity {
-                Vec2 { x: 0, y: 1 }
-            } else {
-                Vec2 { x: 0, y: -1 }
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            let Args {
+                mut cycles,
+                blender, antigravity, tilt_shift,
+                h_time, v_time,
+                ..} = performer.grid.args;
+            let mut funny_modulus_thing = 0;
+            let mut run_step = |dir: &Vec2| {
+                let grid = &mut performer.grid;
+                grid.step(&dir);
+                if grid.args.ms == 0 {
+                    funny_modulus_thing += 1;
+                    if funny_modulus_thing < 5 { return }
+                    funny_modulus_thing = 0;
+                }
+                execute!(io::stdout(), MoveTo(0, 0), BeginSynchronizedUpdate).unwrap();
+                let grid = &performer.grid;
+                grid.render();
+                execute!(io::stdout(), EndSynchronizedUpdate).unwrap();
+                std::thread::sleep(std::time::Duration::from_millis(grid.args.ms));
             };
-            for _ in 0..150 {
-                run_step(&dir);
+            let dirs: &[Vec2];
+            // activate blender mode
+            if blender {
+                dirs = &[
+                    Vec2 { x: -1, y: 0 },
+                    Vec2 { x: 0, y: -1 },
+                    Vec2 { x: 1, y: 0 },
+                    Vec2 { x: 0, y: 1 },
+                ];
+            } else if tilt_shift {
+                dirs = &[
+                    Vec2 { x: -1, y: 0 }, // right
+                    Vec2 { x: 1, y: 0 }, // left
+                    Vec2 { x: 0, y: 1 }, // up
+                    Vec2 { x: 0, y: -1 }, // down
+                    Vec2 { x: -1, y: 0 }, // right
+                    Vec2 { x: 0, y: 1 }, // up
+                    Vec2 { x: -1, y: 0 }, // down
+                    Vec2 { x: 1, y: 0 }, // left
+                ];
+            } else {
+                // normal sand sim
+                dirs = &[ Vec2 { x: 0, y: -1 } ];
+                if cycles == 0 { cycles = 1; }
+            }
+            if cycles == 0 {
+                for dir in dirs.iter().cycle() {
+                    let iters = if dir.x == 0 { v_time } else { h_time };
+                    let dir = if antigravity {
+                        Vec2 { x: -dir.x, y: -dir.y }
+                    } else { *dir };
+                    for _ in 0..iters {
+                        if check_quit() { break 'done }
+                        run_step(&dir);
+                    }
+                }
+            } else {
+                for dir in dirs.iter().cycle().take(dirs.len()*cycles) {
+                    let iters = if dir.x == 0 { v_time } else { h_time };
+                    let dir = if antigravity {
+                        Vec2 { x: -dir.x, y: -dir.y }
+                    } else { *dir };
+                    for _ in 0..iters {
+                        if check_quit() { break 'done }
+                        run_step(&dir);
+                    }
+                }
             }
         }
     }
