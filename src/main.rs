@@ -13,6 +13,7 @@ use rand::seq::SliceRandom;
 use rand::Rng;
 
 use clap::Parser as ClapParser;
+use clap::ValueEnum;
 use unicode_width::UnicodeWidthChar;
 
 use std::{
@@ -21,6 +22,23 @@ use std::{
 };
 
 use anstyle_parse::{DefaultCharAccumulator, Params, Parser, Perform};
+
+#[allow(non_camel_case_types)]
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq)]
+enum Effect {
+    SNOW,
+    GRAVITY,
+    BLENDER,
+    TILT_SHIFT,
+}
+
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq)]
+enum Direction {
+    UP,
+    DOWN,
+    LEFT,
+    RIGHT,
+}
 
 #[derive(ClapParser, Debug)]
 #[command(version, about, long_about = None)]
@@ -45,14 +63,6 @@ struct Args {
     #[arg(long)]
     list_colors: bool,
 
-    /// Enable anti-gravity
-    #[arg(short, long)]
-    antigravity: bool,
-
-    /// Enable snow effect
-    #[arg(long)]
-    snow: bool,
-
     /// Make static characters "sticky," sand won't fall off directly (subtle)
     #[arg(short = 'e', long)]
     edge_stick: bool,
@@ -61,13 +71,9 @@ struct Args {
     #[arg(short = 't', long, default_value_t = 0)]
     stickiness: usize,
 
-    /// Enable blender effect
-    #[arg(long, group = "effect")]
-    blender: bool,
-
-    /// A series of assorted gravity changes.
-    #[arg(long, group = "effect")]
-    tilt_shift: bool,
+    /// Which direction to apply gravity
+    #[arg(value_enum, short = 'd', long, default_values_t = vec![Direction::DOWN])]
+    direction: Vec<Direction>,
 
     /// How many times to repeat cycling effects (0 infinite loop: q or esc to quit)
     #[arg(long, default_value_t = 1)]
@@ -84,25 +90,10 @@ struct Args {
     /// How many simulation steps when simulating horizontally
     #[arg(long, default_value_t = 250)]
     h_time: usize,
-}
 
-#[derive(Debug, Clone)]
-struct Maybe<T>(Option<T>);
-impl<'a> From<&'a str> for Maybe<usize> {
-    fn from(value: &'a str) -> Self {
-        Self(value.parse().ok())
-    }
-}
-impl<T> std::fmt::Display for Maybe<T>
-where
-    T: std::fmt::Display,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Maybe(Some(value)) => value.fmt(f),
-            Maybe(None) => Ok(()),
-        }
-    }
+    /// List of effects to enable
+    #[arg(value_enum, num_args = 1.., value_delimiter = ' ', default_values_t = vec![Effect::GRAVITY])]
+    effects: Vec<Effect>,
 }
 
 #[derive(Clone, Copy)]
@@ -171,6 +162,7 @@ impl Default for Underline {
 struct CellStyle {
     italic: bool,
     bold: bool,
+    strike: bool,
     underline: Underline,
 }
 
@@ -254,6 +246,12 @@ impl Perform for Performer {
                             _ => Underline::Off,
                         };
                     }
+                }
+                9 => {
+                    self.style.strike = true;
+                }
+                29 => {
+                    self.style.strike = false;
                 }
                 24 => {
                     self.style.underline = Underline::Off;
@@ -423,7 +421,7 @@ impl SnowGrid {
     fn get_mut(&mut self, x: usize, y: usize) -> &mut Snowflake {
         &mut self.data[y * self.width + x]
     }
-    fn step(&mut self, args: &Args) {
+    fn step(&mut self, args: &Args, dir: &Vec2) {
         self.flip = (self.flip + 1) % self.flip_rate;
         if self.flip != 0 {
             return;
@@ -431,23 +429,9 @@ impl SnowGrid {
         // spawn
         let mut rng = rand::thread_rng();
         let rand_x = rng.gen_range(0..self.width);
-        self.get_mut(
-            rand_x,
-            match args.antigravity {
-                true => self.height - 1,
-                false => 0,
-            },
-        )
-        .c = *args.snow_chars.choose(&mut rng).unwrap();
-        let range: Box<dyn Iterator<Item = usize>> = match args.antigravity {
-            true => Box::new(0..self.height - 1),
-            false => Box::new((1..self.height).rev()),
-        };
-        for y in range {
-            let delta: usize = match args.antigravity {
-                true => y + 1,
-                false => y - 1,
-            };
+        self.get_mut(rand_x, 0).c = *args.snow_chars.choose(&mut rng).unwrap();
+        for y in (1..self.height).rev() {
+            let delta = y - 1;
             for x in 0..self.width {
                 if !self.is_empty(x, delta) {
                     let rand_choice = rand::random::<f32>();
@@ -501,14 +485,14 @@ impl Grid {
                 height: h,
                 data: vec![Snowflake { c: ' ' }; w * h].into_boxed_slice(),
                 flip: 0,
-                flip_rate: 1,
+                flip_rate: 8,
             },
             snow_bg: SnowGrid {
                 width: w,
                 height: h,
                 data: vec![Snowflake { c: ' ' }; w * h].into_boxed_slice(),
                 flip: 0,
-                flip_rate: 3,
+                flip_rate: 24,
             },
         }
     }
@@ -605,6 +589,14 @@ impl Grid {
                         write!(lock, "\x1b[23m").unwrap();
                     }
                 }
+                if style.strike != d.style.strike {
+                    style.strike = d.style.strike;
+                    if style.strike {
+                        write!(lock, "\x1b[9m").unwrap();
+                    } else {
+                        write!(lock, "\x1b[29m").unwrap();
+                    }
+                }
                 if style.bold != d.style.bold {
                     style.bold = d.style.bold;
                     if style.bold {
@@ -666,9 +658,9 @@ impl Grid {
         execute!(lock, MoveTo(0, 0)).unwrap();
     }
 
-    fn snow_step(&mut self) {
-        self.snow_fg.step(&self.args);
-        self.snow_bg.step(&self.args);
+    fn snow_step(&mut self, dir: &Vec2) {
+        self.snow_fg.step(&self.args, dir);
+        self.snow_bg.step(&self.args, dir);
     }
 
     fn step(&mut self, dir: &Vec2) {
@@ -900,109 +892,93 @@ fn main() {
     execute!(io::stdout(), EnterAlternateScreen, Hide, MoveTo(0, 0)).unwrap();
     enable_raw_mode().unwrap();
     'done: {
+        let snow = performer.grid.args.effects.contains(&Effect::SNOW);
         performer.grid.render();
-        if performer.grid.args.snow {
-            loop {
-                if check_quit() {
-                    break;
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        let Args {
+            mut cycles,
+            h_time,
+            v_time,
+            ..
+        } = performer.grid.args;
+        let user_dirs = &performer
+            .grid
+            .args
+            .direction
+            .iter()
+            .map(|d| match d {
+                Direction::UP => Vec2 { x: 0, y: 1 },
+                Direction::DOWN => Vec2 { x: 0, y: -1 },
+                Direction::LEFT => Vec2 { x: 1, y: 0 },
+                Direction::RIGHT => Vec2 { x: -1, y: 0 },
+            })
+            .collect::<Vec<_>>();
+        let effects = performer.grid.args.effects.clone();
+        let mut funny_modulus_thing = 0;
+        let mut run_step = |dir: &Vec2| {
+            let grid = &mut performer.grid;
+            if snow {
+                grid.snow_step(&dir);
+            }
+            grid.step(&dir);
+            if grid.args.ms == 0 {
+                funny_modulus_thing += 1;
+                if funny_modulus_thing < 5 {
+                    return;
                 }
-                let grid = &mut performer.grid;
-                grid.snow_step();
-                execute!(io::stdout(), MoveTo(0, 0), BeginSynchronizedUpdate).unwrap();
-                performer.grid.render();
-                execute!(io::stdout(), EndSynchronizedUpdate).unwrap();
-                std::thread::sleep(std::time::Duration::from_millis(250));
+                funny_modulus_thing = 0;
+            }
+            execute!(io::stdout(), MoveTo(0, 0), BeginSynchronizedUpdate).unwrap();
+            let grid = &performer.grid;
+            grid.render();
+            execute!(io::stdout(), EndSynchronizedUpdate).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(grid.args.ms));
+        };
+        let dirs: &[Vec2];
+        // activate blender mode
+        if effects.contains(&Effect::BLENDER) {
+            dirs = &[
+                Vec2 { x: -1, y: 0 },
+                Vec2 { x: 0, y: -1 },
+                Vec2 { x: 1, y: 0 },
+                Vec2 { x: 0, y: 1 },
+            ];
+        } else if effects.contains(&Effect::TILT_SHIFT) {
+            dirs = &[
+                Vec2 { x: -1, y: 0 }, // right
+                Vec2 { x: 1, y: 0 },  // left
+                Vec2 { x: 0, y: 1 },  // up
+                Vec2 { x: 0, y: -1 }, // down
+                Vec2 { x: -1, y: 0 }, // right
+                Vec2 { x: 0, y: 1 },  // up
+                Vec2 { x: -1, y: 0 }, // down
+                Vec2 { x: 1, y: 0 },  // left
+            ];
+        } else {
+            // normal sand sim
+            dirs = user_dirs;
+            if cycles == 0 {
+                cycles = 1;
+            }
+        }
+        if cycles == 0 {
+            for dir in dirs.iter().cycle() {
+                let iters = if dir.x == 0 { v_time } else { h_time };
+                for _ in 0..iters {
+                    if check_quit() {
+                        break 'done;
+                    }
+                    run_step(&dir);
+                }
             }
         } else {
-            std::thread::sleep(std::time::Duration::from_millis(400));
-            let Args {
-                mut cycles,
-                blender,
-                antigravity,
-                tilt_shift,
-                h_time,
-                v_time,
-                ..
-            } = performer.grid.args;
-            let mut funny_modulus_thing = 0;
-            let mut run_step = |dir: &Vec2| {
-                let grid = &mut performer.grid;
-                grid.step(&dir);
-                if grid.args.ms == 0 {
-                    funny_modulus_thing += 1;
-                    if funny_modulus_thing < 5 {
-                        return;
+            for dir in dirs.iter().cycle().take(dirs.len() * cycles) {
+                let iters = if dir.x == 0 { v_time } else { h_time };
+                for _ in 0..iters {
+                    if check_quit() {
+                        break 'done;
                     }
-                    funny_modulus_thing = 0;
-                }
-                execute!(io::stdout(), MoveTo(0, 0), BeginSynchronizedUpdate).unwrap();
-                let grid = &performer.grid;
-                grid.render();
-                execute!(io::stdout(), EndSynchronizedUpdate).unwrap();
-                std::thread::sleep(std::time::Duration::from_millis(grid.args.ms));
-            };
-            let dirs: &[Vec2];
-            // activate blender mode
-            if blender {
-                dirs = &[
-                    Vec2 { x: -1, y: 0 },
-                    Vec2 { x: 0, y: -1 },
-                    Vec2 { x: 1, y: 0 },
-                    Vec2 { x: 0, y: 1 },
-                ];
-            } else if tilt_shift {
-                dirs = &[
-                    Vec2 { x: -1, y: 0 }, // right
-                    Vec2 { x: 1, y: 0 },  // left
-                    Vec2 { x: 0, y: 1 },  // up
-                    Vec2 { x: 0, y: -1 }, // down
-                    Vec2 { x: -1, y: 0 }, // right
-                    Vec2 { x: 0, y: 1 },  // up
-                    Vec2 { x: -1, y: 0 }, // down
-                    Vec2 { x: 1, y: 0 },  // left
-                ];
-            } else {
-                // normal sand sim
-                dirs = &[Vec2 { x: 0, y: -1 }];
-                if cycles == 0 {
-                    cycles = 1;
-                }
-            }
-            if cycles == 0 {
-                for dir in dirs.iter().cycle() {
-                    let iters = if dir.x == 0 { v_time } else { h_time };
-                    let dir = if antigravity {
-                        Vec2 {
-                            x: -dir.x,
-                            y: -dir.y,
-                        }
-                    } else {
-                        *dir
-                    };
-                    for _ in 0..iters {
-                        if check_quit() {
-                            break 'done;
-                        }
-                        run_step(&dir);
-                    }
-                }
-            } else {
-                for dir in dirs.iter().cycle().take(dirs.len() * cycles) {
-                    let iters = if dir.x == 0 { v_time } else { h_time };
-                    let dir = if antigravity {
-                        Vec2 {
-                            x: -dir.x,
-                            y: -dir.y,
-                        }
-                    } else {
-                        *dir
-                    };
-                    for _ in 0..iters {
-                        if check_quit() {
-                            break 'done;
-                        }
-                        run_step(&dir);
-                    }
+                    run_step(&dir);
                 }
             }
         }
