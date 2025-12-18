@@ -893,6 +893,11 @@ fn main() {
     enable_raw_mode().unwrap();
     'done: {
         let snow = performer.grid.args.effects.contains(&Effect::SNOW);
+
+        // TODO: is there a better way to write this?
+        let gravity = performer.grid.args.effects.contains(&Effect::GRAVITY)
+            || performer.grid.args.effects.contains(&Effect::TILT_SHIFT)
+            || performer.grid.args.effects.contains(&Effect::BLENDER);
         performer.grid.render();
         std::thread::sleep(std::time::Duration::from_millis(400));
         let Args {
@@ -920,7 +925,9 @@ fn main() {
             if snow {
                 grid.snow_step(&dir);
             }
-            grid.step(&dir);
+            if gravity {
+                grid.step(&dir);
+            }
             if grid.args.ms == 0 {
                 funny_modulus_thing += 1;
                 if funny_modulus_thing < 5 {
