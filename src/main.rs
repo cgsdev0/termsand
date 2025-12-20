@@ -964,7 +964,7 @@ fn main() {
         } else {
             // normal sand sim
             dirs = user_dirs;
-            if cycles == 0 {
+            if cycles == 0 && gravity {
                 cycles = 1;
             }
         }
