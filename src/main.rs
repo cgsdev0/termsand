@@ -398,6 +398,18 @@ fn write_color(lock: &mut io::StdoutLock<'static>, fg: u32) {
         write!(lock, "\x1b[38;2;{};{};{}m", r, g, b).unwrap();
     }
 }
+fn write_color_escaped(lock: &mut io::StdoutLock<'static>, fg: u32) {
+    if fg == u32::MAX {
+        write!(lock, "\\x1b[39m").unwrap();
+    } else if fg < (1 << 31) {
+        write!(lock, "\\x1b[38;5;{}m", fg).unwrap();
+    } else {
+        let r = ((fg >> 16) & 0xFF) as u8;
+        let g = ((fg >> 8) & 0xFF) as u8;
+        let b = ((fg) & 0xFF) as u8;
+        write!(lock, "\\x1b[38;2;{};{};{}m", r, g, b).unwrap();
+    }
+}
 fn write_ul_color(lock: &mut io::StdoutLock<'static>, ul: u32) {
     if ul == u32::MAX {
         write!(lock, "\x1b[59m").unwrap();
@@ -878,7 +890,10 @@ fn main() {
         write!(lock, "Colors detected in input:\n").unwrap();
         for color in performer.colors.iter() {
             write_color(&mut lock, *color);
-            write!(lock, "  ***** {}\n", color).unwrap();
+            write!(lock, "  ***** {} ", color).unwrap();
+            write!(lock, "\x1b[39m").unwrap();
+            write_color_escaped(&mut lock, *color);
+            write!(lock, "\n").unwrap();
         }
         write!(lock, "\x1b[39m\n").unwrap();
         for color in performer.bg_colors.iter() {
