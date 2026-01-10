@@ -187,7 +187,7 @@ impl Perform for Performer {
         if self.y >= self.grid.height {
             return;
         }
-        *self.grid.get_mut(self.x, self.y) = Cell {
+        *self.grid.get_mut(self.x, self.y).unwrap() = Cell {
             c,
             fg: self.fg,
             bg: self.bg,
@@ -197,7 +197,10 @@ impl Perform for Performer {
         let mut width = UnicodeWidthChar::width(c).unwrap();
         while width > 0 {
             self.x += 1;
-            self.grid.get_mut(self.x, self.y).bg = self.bg;
+            match self.grid.get_mut(self.x, self.y) {
+                Some(cell) => cell.bg = self.bg,
+                None => {}
+            }
             width -= 1;
         }
     }
@@ -516,7 +519,7 @@ impl Grid {
         }
         let mut i = x;
         while i < self.width {
-            self.get_mut(i, y).bg = bg;
+            self.get_mut(i, y).unwrap().bg = bg;
             i += 1;
         }
     }
@@ -526,8 +529,11 @@ impl Grid {
         }
         Some(&self.data[pos.y as usize * self.width + pos.x as usize])
     }
-    fn get_mut(&mut self, x: usize, y: usize) -> &mut Cell {
-        &mut self.data[y * self.width + x]
+    fn get_mut(&mut self, x: usize, y: usize) -> Option<&mut Cell> {
+        if x < 0 || x >= self.width || y < 0 || y >= self.height {
+            return None;
+        }
+        Some(&mut self.data[y * self.width + x])
     }
 
     fn swap(&mut self, pos1: Vec2, pos2: Vec2) {
@@ -583,6 +589,7 @@ impl Grid {
         let mut ul = u32::MAX;
         let mut style = CellStyle::default();
         let mut lock = io::stdout().lock();
+        write!(lock, "\x1b[0m").unwrap();
         for y in 0..self.height {
             let mut skip = 0;
             for x in 0..self.width {
