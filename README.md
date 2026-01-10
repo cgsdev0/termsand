@@ -1,25 +1,24 @@
 # termsand
 
-this is VERY rough and hacked together in a couple hours
-
-it may not work exactly right for you
-
+termsand is the sand simulation for your terminal that no one asked for
 ![sand3-small](https://github.com/user-attachments/assets/3763fef3-3ba6-4532-887e-f5a61fe2b221)
 
-## how do i use it
+## how do i use it?
 
-this thing is designed to work with tmux 3.4+
+termsand is intended to work with tmux 3.4+
 
-1. `cargo install --git https://github.com/cgsdev0/termsand`
+1. `cargo install termsand`
 2. download [`sand.sh`](https://github.com/cgsdev0/termsand/blob/main/sand.sh) to somewhere
 3. bind it to a key in your `tmux.conf` like this:
 ```
 bind-key e run-shell "./sand.sh"
 ```
 
-and then maybe it will work
+## how does it work?
 
-good luck have fun
+termsand will take input from `stdin` and use that as the initial state for the simulation
+
+the `sand.sh` wrapper script captures your current tmux pane and pipes it into termsand inside of a popup, like this:
 
 ![tmux_1](https://github.com/user-attachments/assets/42ade40d-b944-4e6c-9313-48a159045b1f)
 
