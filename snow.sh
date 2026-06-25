@@ -2,4 +2,4 @@
 
 cd "${0%/*}"
 
-./sand.sh --snow "$@"
+./sand.sh snow "$@"
