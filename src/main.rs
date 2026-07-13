@@ -145,8 +145,7 @@ impl core::ops::Sub<&Vec2> for Vec2 {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
 enum Underline {
     #[default]
     Off = 0,
@@ -176,6 +175,24 @@ struct Performer {
     style: CellStyle,
     colors: std::collections::HashSet<u32>,
     bg_colors: std::collections::HashSet<u32>,
+    inverted: bool,
+}
+
+impl Performer {
+    fn bg(&self) -> u32 {
+        if self.inverted {
+            self.fg
+        } else {
+            self.bg
+        }
+    }
+    fn fg(&self) -> u32 {
+        if self.inverted {
+            self.bg
+        } else {
+            self.fg
+        }
+    }
 }
 
 impl Perform for Performer {
@@ -188,15 +205,18 @@ impl Perform for Performer {
         }
         *self.grid.get_mut(self.x, self.y).unwrap() = Cell {
             c,
-            fg: self.fg,
-            bg: self.bg,
+            fg: self.fg(),
+            bg: self.bg(),
             ul_color: self.ul_color,
             style: self.style.clone(),
         };
         let mut width = UnicodeWidthChar::width(c).unwrap();
         while width > 0 {
             self.x += 1;
-            if let Some(cell) = self.grid.get_mut(self.x, self.y) { cell.bg = self.bg }
+            let bg = self.bg();
+            if let Some(cell) = self.grid.get_mut(self.x, self.y) {
+                cell.bg = bg
+            }
             width -= 1;
         }
     }
@@ -204,7 +224,7 @@ impl Perform for Performer {
     fn execute(&mut self, byte: u8) {
         if byte == 0x0a {
             if self.x > 0 {
-                self.grid.splat(self.x, self.y, self.bg);
+                self.grid.splat(self.x, self.y, self.bg());
             }
             self.y += 1;
 
@@ -223,6 +243,7 @@ impl Perform for Performer {
                     self.ul_color = u32::MAX;
                     self.colors.insert(self.fg);
                     self.style = CellStyle::default();
+                    self.inverted = false;
                 }
                 1 => {
                     self.style.bold = true;
@@ -246,6 +267,9 @@ impl Perform for Performer {
                         };
                     }
                 }
+                7 => {
+                    self.inverted = true;
+                }
                 9 => {
                     self.style.strike = true;
                 }
@@ -260,6 +284,9 @@ impl Perform for Performer {
                 }
                 23 => {
                     self.style.italic = false;
+                }
+                27 => {
+                    self.inverted = false;
                 }
                 30..=37 => {
                     self.fg = (items[0][0] - 30) as u32;
@@ -753,7 +780,9 @@ impl Grid {
         }
     }
     fn step_slide(&mut self, pos: Vec2, up: Vec2, dir_right: Vec2) {
-        let Some(_current) = self.get(pos) else { return };
+        let Some(_current) = self.get(pos) else {
+            return;
+        };
         let Some(up_cell) = self.get(up) else { return };
         if !self.is_sand(up_cell) {
             return;
@@ -963,6 +992,7 @@ fn main() {
         style: CellStyle::default(),
         colors: std::collections::HashSet::new(),
         bg_colors: std::collections::HashSet::new(),
+        inverted: false,
     };
 
     let mut buf = [0; 2048];
