@@ -146,18 +146,15 @@ impl core::ops::Sub<&Vec2> for Vec2 {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 enum Underline {
+    #[default]
     Off = 0,
     Single = 1,
     Double = 2,
     Curly = 3,
     Dotted = 4,
     Dashed = 5,
-}
-impl Default for Underline {
-    fn default() -> Self {
-        Self::Off
-    }
 }
 
 #[derive(Default, Clone)]
@@ -199,10 +196,7 @@ impl Perform for Performer {
         let mut width = UnicodeWidthChar::width(c).unwrap();
         while width > 0 {
             self.x += 1;
-            match self.grid.get_mut(self.x, self.y) {
-                Some(cell) => cell.bg = self.bg,
-                None => {}
-            }
+            if let Some(cell) = self.grid.get_mut(self.x, self.y) { cell.bg = self.bg }
             width -= 1;
         }
     }
@@ -219,7 +213,7 @@ impl Perform for Performer {
         }
     }
 
-    fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8], ignore: bool, c: u8) {
+    fn csi_dispatch(&mut self, params: &Params, _intermediates: &[u8], _ignore: bool, _c: u8) {
         let items: Vec<_> = params.iter().collect();
         {
             match items[0][0] {
@@ -438,7 +432,7 @@ impl SnowGrid {
     fn get_mut(&mut self, x: usize, y: usize) -> &mut Snowflake {
         &mut self.data[y * self.width + x]
     }
-    fn step(&mut self, args: &Args, dir: &Vec2) {
+    fn step(&mut self, args: &Args, _dir: &Vec2) {
         self.flip = (self.flip + 1) % self.flip_rate;
         if self.flip != 0 {
             return;
@@ -469,7 +463,7 @@ impl SnowGrid {
         if cell.c == ' ' {
             return true;
         }
-        return false;
+        false
     }
     fn swap(&mut self, x1: usize, y1: usize, x2: usize, y2: usize) {
         let idx1 = y1 * self.width + x1;
@@ -759,7 +753,7 @@ impl Grid {
         }
     }
     fn step_slide(&mut self, pos: Vec2, up: Vec2, dir_right: Vec2) {
-        let Some(current) = self.get(pos) else { return };
+        let Some(_current) = self.get(pos) else { return };
         let Some(up_cell) = self.get(up) else { return };
         if !self.is_sand(up_cell) {
             return;
@@ -996,24 +990,24 @@ fn main() {
 
     if performer.grid.args.list_colors {
         let mut lock = io::stdout().lock();
-        write!(
+        writeln!(
             lock,
-            "These numbers can be used for the '--color' and '--bg' flags.\n"
+            "These numbers can be used for the '--color' and '--bg' flags."
         )
         .unwrap();
-        write!(lock, "Colors detected in input:\n").unwrap();
+        writeln!(lock, "Colors detected in input:").unwrap();
         for color in performer.colors.iter() {
             write_color(&mut lock, *color);
             write!(lock, "  ***** {} ", color).unwrap();
             write!(lock, "\x1b[39m").unwrap();
             // write_color_escaped(&mut lock, *color);
-            write!(lock, "\n").unwrap();
+            writeln!(lock).unwrap();
         }
-        write!(lock, "\x1b[39m\n").unwrap();
+        writeln!(lock, "\x1b[39m").unwrap();
         for color in performer.bg_colors.iter() {
             write_bg_color(&mut lock, *color);
             write!(lock, "  ***** {}", color).unwrap();
-            write!(lock, "\x1b[49m\n").unwrap();
+            writeln!(lock, "\x1b[49m").unwrap();
         }
         return;
     }
@@ -1052,10 +1046,10 @@ fn main() {
         let mut run_step = |dir: &Vec2| {
             let grid = &mut performer.grid;
             if snow {
-                grid.snow_step(&dir);
+                grid.snow_step(dir);
             }
             if gravity {
-                grid.step(&dir);
+                grid.step(dir);
             }
             if grid.args.ms == 0 {
                 funny_modulus_thing += 1;
@@ -1104,7 +1098,7 @@ fn main() {
                     if check_quit() {
                         break 'done;
                     }
-                    run_step(&dir);
+                    run_step(dir);
                 }
             }
         } else {
@@ -1114,7 +1108,7 @@ fn main() {
                     if check_quit() {
                         break 'done;
                     }
-                    run_step(&dir);
+                    run_step(dir);
                 }
             }
         }
