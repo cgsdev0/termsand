@@ -8,17 +8,16 @@ termsand is the sand simulation for your terminal that no one asked for
 termsand is intended to work with tmux 3.4+
 
 1. `cargo install termsand`
-2. download [`sand.sh`](https://github.com/cgsdev0/termsand/blob/main/sand.sh) to somewhere
-3. bind it to a key in your `tmux.conf` like this:
+2. (optional) bind it to a key in your `tmux.conf` like this:
 ```
-bind-key e run-shell "./sand.sh"
+bind-key e run-shell termsand
 ```
 
 ## how does it work?
 
 termsand will take input from `stdin` and use that as the initial state for the simulation
 
-the `sand.sh` wrapper script captures your current tmux pane and pipes it into termsand inside of a popup, like this:
+If you don't pipe anything in, termsand instead captures your current tmux pane and pipes it into another termsand process inside of a popup, like this:
 
 ![tmux_1](https://github.com/user-attachments/assets/42ade40d-b944-4e6c-9313-48a159045b1f)
 

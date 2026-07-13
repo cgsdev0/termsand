@@ -1,4 +1,4 @@
-//! Parse input from stdin and log actions on stdout
+use anyhow::{bail, Context, Result};
 use crossterm::{
     cursor::{Hide, MoveTo, MoveToNextLine, Show},
     event::{self, Event, KeyCode, KeyEvent},
@@ -8,6 +8,8 @@ use crossterm::{
         EnterAlternateScreen, LeaveAlternateScreen,
     },
 };
+use std::process::Command;
+use tempfile::NamedTempFile;
 
 use rand::seq::SliceRandom;
 use rand::Rng;
@@ -17,7 +19,7 @@ use clap::ValueEnum;
 use unicode_width::UnicodeWidthChar;
 
 use std::{
-    io::{self, Read, Write},
+    io::{self, IsTerminal, Read, Write},
     u32,
 };
 
@@ -40,7 +42,7 @@ enum Direction {
     RIGHT,
 }
 
-#[derive(ClapParser, Debug)]
+#[derive(ClapParser, Debug, Clone)]
 #[command(version, about, long_about = None)]
 struct Args {
     /// Treat border characters as static
@@ -851,21 +853,114 @@ fn check_quit() -> bool {
     }
 }
 
+fn fork_self_helper(args: &Args) -> Result<()> {
+    let output = Command::new("tmux").arg("display").arg("-p").arg("#{pane_id} #{pane_width} #{pane_height} #{pane_left} #{pane_top} #{status}-#{status-position}").output().context("failed to spawn tmux display")?;
+    if !output.status.success() {
+        bail!("failed to read tmux state");
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parts: Vec<_> = stdout.split(" ").collect();
+    if parts.len() != 6 {
+        bail!("where did you find this tmux");
+    }
+
+    let pane = parts[0];
+    let width = parts[1].parse::<i32>()?;
+    let height = parts[2].parse::<i32>()?;
+    let left = parts[3].parse::<i32>()?;
+    let top = parts[4].parse::<i32>()?;
+    let mut y = top + height;
+    if parts[5] == "on-top" {
+        y += 1;
+    }
+    let capture = Command::new("tmux")
+        .arg("capture-pane")
+        .arg("-CTpet")
+        .arg(pane)
+        .output()
+        .context("failed to spawn tmux capture-pane")?;
+    if !capture.status.success() {
+        bail!("failed to capture");
+    }
+    let stdout = String::from_utf8_lossy(&capture.stdout);
+    let mut file = NamedTempFile::new()?;
+    writeln!(file, "{}", stdout.replace("\\033", "\x1b"))?;
+    let path = file.into_temp_path();
+    let raw_args: Vec<String> = std::env::args().collect();
+    let self_arg = if raw_args[0].starts_with("./") {
+        let canon = std::fs::canonicalize(&raw_args[0])?;
+        canon.to_owned().to_string_lossy().to_string()
+    } else {
+        match which::which(&raw_args[0]) {
+            Ok(path) => path.to_owned().to_string_lossy().to_string(),
+            Err(_) => "termsand".to_string(),
+        }
+    };
+    let args_without_first = &raw_args[1..];
+    let termsand_invocation = format!(
+        "TERMSAND_DONT_FORK=1 {} {} < {}",
+        self_arg,
+        shell_words::join(args_without_first),
+        path.to_str().unwrap()
+    );
+    let mut cmd = Command::new("tmux");
+    cmd.arg("display-popup").arg("-B");
+
+    if !args.list_colors {
+        cmd.arg("-E");
+    }
+
+    let popup = cmd
+        .arg("-y")
+        .arg(y.to_string())
+        .arg("-x")
+        .arg(left.to_string())
+        .arg("-w")
+        .arg(width.to_string())
+        .arg("-h")
+        .arg(height.to_string())
+        .arg(termsand_invocation)
+        .output()
+        .context("failed to spawn tmux display-popup")?;
+    if !popup.status.success() {
+        bail!("failed to spawn popup");
+    }
+    if args.list_colors {
+        println!("{}", String::from_utf8_lossy(&popup.stdout));
+    }
+    Ok(())
+}
+fn fork_self(args: Args) {
+    if std::env::var("TERMSAND_DONT_FORK").is_ok() {
+        std::process::exit(1);
+    }
+    let result = fork_self_helper(&args);
+    if let Err(e) = result {
+        panic!("error: {:?}", e);
+    };
+}
+
 fn main() {
     let mut args = Args::parse();
     if args.snow_chars.is_empty() {
         args.snow_chars = vec!['*', '.', '+'];
     }
 
+    let stdin = io::stdin();
+    let is_terminal = stdin.is_terminal();
+
+    if is_terminal {
+        return fork_self(args);
+    }
     let Some((w, h)) = term_size::dimensions() else {
-        panic!("unable to get term dimensions");
+        return fork_self(args);
     };
     let input = io::stdin();
     let mut handle = input.lock();
 
     let mut statemachine = Parser::<DefaultCharAccumulator>::new();
     let mut performer = Performer {
-        grid: Grid::new(args, w, h),
+        grid: Grid::new(args.clone(), w, h),
         x: 0,
         y: 0,
         fg: u32::MAX,
@@ -878,13 +973,20 @@ fn main() {
 
     let mut buf = [0; 2048];
 
+    let mut bytes_read = 0;
     loop {
         match handle.read(&mut buf) {
-            Ok(0) => break,
+            Ok(0) => {
+                if bytes_read == 0 {
+                    return fork_self(args);
+                }
+                break;
+            }
             Ok(n) => {
                 for byte in &buf[..n] {
                     statemachine.advance(&mut performer, *byte);
                 }
+                bytes_read += n;
             }
             Err(_err) => {
                 break;
@@ -894,12 +996,17 @@ fn main() {
 
     if performer.grid.args.list_colors {
         let mut lock = io::stdout().lock();
+        write!(
+            lock,
+            "These numbers can be used for the '--color' and '--bg' flags.\n"
+        )
+        .unwrap();
         write!(lock, "Colors detected in input:\n").unwrap();
         for color in performer.colors.iter() {
             write_color(&mut lock, *color);
             write!(lock, "  ***** {} ", color).unwrap();
             write!(lock, "\x1b[39m").unwrap();
-            write_color_escaped(&mut lock, *color);
+            // write_color_escaped(&mut lock, *color);
             write!(lock, "\n").unwrap();
         }
         write!(lock, "\x1b[39m\n").unwrap();

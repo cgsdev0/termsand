@@ -1,6 +1,6 @@
 [package]
 name = "termsand"
-version = "0.2.2"
+version = "0.3.0"
 edition = "2021"
 description = "Falling sand simulation for tmux"
 license = "MIT"
@@ -8,9 +8,13 @@ license = "MIT"
 
 [dependencies]
 anstyle-parse = "0.2.5"
+anyhow = "1.0.103"
 clap = { version = "4.5.15", features = ["derive"] }
 console = "0.16.1"
 crossterm = "0.28.1"
 rand = "0.8.5"
+shell-words = "1.1.1"
+tempfile = "3.27.0"
 term_size = "0.3.2"
 unicode-width = "0.2.2"
+which = "8.0.4"
