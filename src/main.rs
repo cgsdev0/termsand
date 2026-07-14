@@ -78,7 +78,7 @@ struct Args {
     direction: Vec<Direction>,
 
     /// How many times to repeat cycling effects (0 infinite loop: q or esc to quit)
-    #[arg(long, default_value_t = 1)]
+    #[arg(long, default_value_t = 0)]
     cycles: usize,
 
     /// How many milliseconds to sleep for
@@ -98,7 +98,7 @@ struct Args {
     effects: Vec<Effect>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 struct Vec2 {
     x: isize,
     y: isize,
@@ -451,7 +451,10 @@ fn write_ul_color(lock: &mut io::StdoutLock<'static>, ul: u32) {
 
 impl SnowGrid {
     fn get(&self, x: usize, y: usize) -> Option<char> {
-        match self.is_empty(x, y) {
+        match self.is_empty(&Vec2 {
+            x: x as isize,
+            y: y as isize,
+        }) {
             true => None,
             false => Some(self.data[y * self.width + x].c),
         }
@@ -459,42 +462,96 @@ impl SnowGrid {
     fn get_mut(&mut self, x: usize, y: usize) -> &mut Snowflake {
         &mut self.data[y * self.width + x]
     }
-    fn step(&mut self, args: &Args, _dir: &Vec2) {
+    fn spawn(&mut self, args: &Args, dir: &Vec2) {
+        let mut rng = rand::thread_rng();
+        if dir.x == 0 {
+            let rand_x = rng.gen_range(0..self.width);
+            self.get_mut(rand_x, if dir.y > 0 { self.height - 1 } else { 0 })
+                .c = *args.snow_chars.choose(&mut rng).unwrap();
+        } else {
+            let rand_y = rng.gen_range(0..self.height);
+            self.get_mut(if dir.x < 0 { self.width - 1 } else { 0 }, rand_y)
+                .c = *args.snow_chars.choose(&mut rng).unwrap();
+        }
+    }
+
+    fn step_fall(&mut self, pos: Vec2, dir: Vec2) {
+        let dir = Vec2 {
+            x: -dir.x,
+            y: dir.y,
+        };
+        let down = pos + dir;
+        let dir_right = Vec2 {
+            x: -dir.y,
+            y: dir.x,
+        };
+        let dir_left = Vec2 {
+            x: dir.y,
+            y: -dir.x,
+        };
+        let right = pos + dir_right;
+        let left = pos + dir_left;
+        let rand_choice = rand::random::<f32>();
+        if self.is_in_bounds(&down) && !self.is_empty(&down) {
+            if rand_choice < 0.2 && self.is_in_bounds(&left) && self.is_empty(&left) {
+                self.swap(&left, &down);
+            } else if rand_choice >= 0.8 && self.is_in_bounds(&right) && self.is_empty(&right) {
+                self.swap(&right, &down);
+            } else if self.is_empty(&down) {
+                self.swap(&pos, &down);
+            }
+        }
+    }
+
+    fn step(&mut self, args: &Args, dir: &Vec2) {
         self.flip = (self.flip + 1) % self.flip_rate;
         if self.flip != 0 {
             return;
         }
-        // spawn
-        let mut rng = rand::thread_rng();
-        let rand_x = rng.gen_range(0..self.width);
-        self.get_mut(rand_x, 0).c = *args.snow_chars.choose(&mut rng).unwrap();
-        for y in (1..self.height).rev() {
-            let delta = y - 1;
-            for x in 0..self.width {
-                if !self.is_empty(x, delta) {
-                    let rand_choice = rand::random::<f32>();
-
-                    if rand_choice < 0.2 && x > 0 && self.is_empty(x - 1, y) {
-                        self.swap(x - 1, y, x, delta);
-                    } else if rand_choice >= 0.8 && x < self.width - 1 && self.is_empty(x + 1, y) {
-                        self.swap(x + 1, y, x, delta);
-                    } else if self.is_empty(x, y) {
-                        self.swap(x, y, x, delta);
-                    }
+        let yrange: Box<dyn Iterator<Item = usize>> = match dir.y {
+            -1 => Box::new((1..self.height).rev()), // down (process from bottom up)
+            _ => Box::new(0..self.height - 1),      // up
+        };
+        let xrange: Box<dyn Iterator<Item = usize>> = match dir.x {
+            -1 => Box::new((1..self.width).rev()),
+            _ => Box::new(0..self.width - 1),
+        };
+        self.spawn(args, dir);
+        if dir.x == 0 {
+            for y in yrange {
+                for x in 0..self.width {
+                    let pos = Vec2 {
+                        x: x as isize,
+                        y: y as isize,
+                    };
+                    self.step_fall(pos, *dir);
+                }
+            }
+        } else {
+            for x in xrange {
+                for y in 0..self.height {
+                    let pos = Vec2 {
+                        x: x as isize,
+                        y: y as isize,
+                    };
+                    self.step_fall(pos, *dir);
                 }
             }
         }
     }
-    fn is_empty(&self, x: usize, y: usize) -> bool {
-        let cell = &self.data[y * self.width + x];
+    fn is_in_bounds(&self, pos: &Vec2) -> bool {
+        !(pos.x < 0 || pos.y < 0 || pos.x >= self.width as isize || pos.y >= self.height as isize)
+    }
+    fn is_empty(&self, pos: &Vec2) -> bool {
+        let cell = &self.data[pos.y as usize * self.width + pos.x as usize];
         if cell.c == ' ' {
             return true;
         }
         false
     }
-    fn swap(&mut self, x1: usize, y1: usize, x2: usize, y2: usize) {
-        let idx1 = y1 * self.width + x1;
-        let idx2 = y2 * self.width + x2;
+    fn swap(&mut self, a: &Vec2, b: &Vec2) {
+        let idx1 = a.y as usize * self.width + a.x as usize;
+        let idx2 = b.y as usize * self.width + b.x as usize;
 
         self.data.swap(idx1, idx2);
     }
@@ -1117,7 +1174,7 @@ fn main() {
         } else {
             // normal sand sim
             dirs = user_dirs;
-            if cycles == 0 && gravity {
+            if cycles == 0 && gravity && dirs.len() == 1 {
                 cycles = 1;
             }
         }
