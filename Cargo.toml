@@ -1,6 +1,6 @@
 [package]
 name = "termsand"
-version = "0.3.2"
+version = "0.3.3"
 edition = "2024"
 description = "Falling sand simulation for tmux"
 license = "MIT"

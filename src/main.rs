@@ -396,7 +396,7 @@ impl Cell {
         }
     }
     fn is_empty(&self) -> bool {
-        self.c == '\0' || self.c == ' '
+        (self.c == '\0' || self.c == ' ') && self.style.underline == Underline::Off
     }
 }
 
