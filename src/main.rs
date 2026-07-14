@@ -950,7 +950,7 @@ fn fork_self_helper(args: &Args) -> Result<()> {
     let left = parts[3].parse::<i32>()?;
     let top = parts[4].parse::<i32>()?;
     let mut y = top + height;
-    if parts[5] == "on-top" {
+    if parts[5].starts_with("on-top") {
         y += 1;
     }
     let capture = Command::new("tmux")
