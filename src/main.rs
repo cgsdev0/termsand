@@ -18,28 +18,25 @@ use clap::Parser as ClapParser;
 use clap::ValueEnum;
 use unicode_width::UnicodeWidthChar;
 
-use std::{
-    io::{self, IsTerminal, Read, Write},
-    u32,
-};
+use std::io::{self, IsTerminal, Read, Write};
 
 use anstyle_parse::{DefaultCharAccumulator, Params, Parser, Perform};
 
 #[allow(non_camel_case_types)]
 #[derive(ValueEnum, Debug, Clone, Copy, PartialEq)]
 enum Effect {
-    SNOW,
-    GRAVITY,
-    BLENDER,
-    TILT_SHIFT,
+    Snow,
+    Gravity,
+    Blender,
+    TiltShift,
 }
 
 #[derive(ValueEnum, Debug, Clone, Copy, PartialEq)]
 enum Direction {
-    UP,
-    DOWN,
-    LEFT,
-    RIGHT,
+    Up,
+    Down,
+    Left,
+    Right,
 }
 
 #[derive(ClapParser, Debug, Clone)]
@@ -74,7 +71,7 @@ struct Args {
     stickiness: usize,
 
     /// Which direction to apply gravity
-    #[arg(value_enum, short = 'd', long, default_values_t = vec![Direction::DOWN])]
+    #[arg(value_enum, short = 'd', long, default_values_t = vec![Direction::Down])]
     direction: Vec<Direction>,
 
     /// How many times to repeat cycling effects (0 infinite loop: q or esc to quit)
@@ -94,7 +91,7 @@ struct Args {
     h_time: usize,
 
     /// List of effects to enable
-    #[arg(value_enum, num_args = 1.., value_delimiter = ' ', default_values_t = vec![Effect::GRAVITY])]
+    #[arg(value_enum, num_args = 1.., value_delimiter = ' ', default_values_t = vec![Effect::Gravity])]
     effects: Vec<Effect>,
 }
 
@@ -390,11 +387,9 @@ struct SnowGrid {
 
 impl Cell {
     fn is_box_char(&self) -> bool {
-        match self.c {
-            '\u{2500}'..='\u{257F}' => true,
-            _ => false,
-        }
+        matches!(self.c, '\u{2500}'..='\u{257F}')
     }
+
     fn is_empty(&self) -> bool {
         (self.c == '\0' || self.c == ' ') && self.style.underline == Underline::Off
     }
@@ -412,6 +407,7 @@ fn write_bg_color(lock: &mut io::StdoutLock<'static>, bg: u32) {
         write!(lock, "\x1b[48;2;{};{};{}m", r, g, b).unwrap();
     }
 }
+
 fn write_color(lock: &mut io::StdoutLock<'static>, fg: u32) {
     if fg == u32::MAX {
         write!(lock, "\x1b[39m").unwrap();
@@ -424,18 +420,7 @@ fn write_color(lock: &mut io::StdoutLock<'static>, fg: u32) {
         write!(lock, "\x1b[38;2;{};{};{}m", r, g, b).unwrap();
     }
 }
-fn write_color_escaped(lock: &mut io::StdoutLock<'static>, fg: u32) {
-    if fg == u32::MAX {
-        write!(lock, "\\x1b[39m").unwrap();
-    } else if fg < (1 << 31) {
-        write!(lock, "\\x1b[38;5;{}m", fg).unwrap();
-    } else {
-        let r = ((fg >> 16) & 0xFF) as u8;
-        let g = ((fg >> 8) & 0xFF) as u8;
-        let b = ((fg) & 0xFF) as u8;
-        write!(lock, "\\x1b[38;2;{};{};{}m", r, g, b).unwrap();
-    }
-}
+
 fn write_ul_color(lock: &mut io::StdoutLock<'static>, ul: u32) {
     if ul == u32::MAX {
         write!(lock, "\x1b[59m").unwrap();
@@ -610,7 +595,7 @@ impl Grid {
         Some(&self.data[pos.y as usize * self.width + pos.x as usize])
     }
     fn get_mut(&mut self, x: usize, y: usize) -> Option<&mut Cell> {
-        if x < 0 || x >= self.width || y < 0 || y >= self.height {
+        if x >= self.width || y >= self.height {
             return None;
         }
         Some(&mut self.data[y * self.width + x])
@@ -836,41 +821,7 @@ impl Grid {
             self.swap(pos, up);
         }
     }
-    fn step_slide(&mut self, pos: Vec2, up: Vec2, dir_right: Vec2) {
-        let Some(_current) = self.get(pos) else {
-            return;
-        };
-        let Some(up_cell) = self.get(up) else { return };
-        if !self.is_sand(up_cell) {
-            return;
-        }
-        let rand_choice = rand::random::<f32>();
 
-        let left = pos - dir_right;
-        let right = pos + dir_right;
-        let cell_left = self.get(left);
-        let cell_right = self.get(right);
-        let left_valid = if let Some(cell_left) = cell_left {
-            cell_left.is_empty() && !self.is_static(cell_left)
-        } else {
-            false
-        };
-        let right_valid = if let Some(cell_right) = cell_right {
-            cell_right.is_empty() && !self.is_static(cell_right)
-        } else {
-            false
-        };
-        // do the swaps
-        if left_valid {
-            if right_valid && rand_choice > 0.5 {
-                self.swap(right, up);
-            } else {
-                self.swap(left, up);
-            }
-        } else if right_valid {
-            self.swap(right, up);
-        }
-    }
     fn step_collapse(&mut self, pos: Vec2, up: Vec2, dir_right: Vec2) {
         let Some(current) = self.get(pos) else { return };
         let Some(up_cell) = self.get(up) else { return };
@@ -926,11 +877,7 @@ fn check_quit() -> bool {
     let Some(keycode) = get_keycode() else {
         return false;
     };
-    match keycode {
-        KeyCode::Char('q') => true,
-        KeyCode::Esc => true,
-        _ => false,
-    }
+    matches!(keycode, KeyCode::Char('q') | KeyCode::Esc)
 }
 
 fn fork_self_helper(args: &Args) -> Result<()> {
@@ -1102,12 +1049,12 @@ fn main() {
     execute!(io::stdout(), EnterAlternateScreen, Hide, MoveTo(0, 0)).unwrap();
     enable_raw_mode().unwrap();
     'done: {
-        let snow = performer.grid.args.effects.contains(&Effect::SNOW);
+        let snow = performer.grid.args.effects.contains(&Effect::Snow);
 
         // TODO: is there a better way to write this?
-        let gravity = performer.grid.args.effects.contains(&Effect::GRAVITY)
-            || performer.grid.args.effects.contains(&Effect::TILT_SHIFT)
-            || performer.grid.args.effects.contains(&Effect::BLENDER);
+        let gravity = performer.grid.args.effects.contains(&Effect::Gravity)
+            || performer.grid.args.effects.contains(&Effect::TiltShift)
+            || performer.grid.args.effects.contains(&Effect::Blender);
         performer.grid.render();
         std::thread::sleep(std::time::Duration::from_millis(400));
         let Args {
@@ -1122,10 +1069,10 @@ fn main() {
             .direction
             .iter()
             .map(|d| match d {
-                Direction::UP => Vec2 { x: 0, y: 1 },
-                Direction::DOWN => Vec2 { x: 0, y: -1 },
-                Direction::LEFT => Vec2 { x: 1, y: 0 },
-                Direction::RIGHT => Vec2 { x: -1, y: 0 },
+                Direction::Up => Vec2 { x: 0, y: 1 },
+                Direction::Down => Vec2 { x: 0, y: -1 },
+                Direction::Left => Vec2 { x: 1, y: 0 },
+                Direction::Right => Vec2 { x: -1, y: 0 },
             })
             .collect::<Vec<_>>();
         let effects = performer.grid.args.effects.clone();
@@ -1153,14 +1100,14 @@ fn main() {
         };
         let dirs: &[Vec2];
         // activate blender mode
-        if effects.contains(&Effect::BLENDER) {
+        if effects.contains(&Effect::Blender) {
             dirs = &[
                 Vec2 { x: -1, y: 0 },
                 Vec2 { x: 0, y: -1 },
                 Vec2 { x: 1, y: 0 },
                 Vec2 { x: 0, y: 1 },
             ];
-        } else if effects.contains(&Effect::TILT_SHIFT) {
+        } else if effects.contains(&Effect::TiltShift) {
             dirs = &[
                 Vec2 { x: -1, y: 0 }, // right
                 Vec2 { x: 1, y: 0 },  // left
