@@ -932,7 +932,7 @@ fn fork_self_helper(args: &Args) -> Result<()> {
     );
     let mut cmd = Command::new("tmux");
     cmd.arg("display-popup").arg("-B");
-    cmd.arg("-s").arg("bg=default");
+    cmd.arg("-s").arg("bg=terminal");
 
     if !args.list_colors {
         cmd.arg("-E");
