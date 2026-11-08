@@ -4,6 +4,7 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     flake-parts.url = "github:hercules-ci/flake-parts";
+    systems.url = "github:nix-systems/default";
 
     rust-overlay.url = "github:oxalica/rust-overlay";
     rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
@@ -11,10 +12,7 @@
 
   outputs = inputs@{ self, nixpkgs, flake-parts, rust-overlay, ... }:
     flake-parts.lib.mkFlake { inherit inputs; } {
-      systems = [
-        "x86_64-linux"
-        "aarch64-linux"
-      ];
+      systems = import inputs.systems;
 
       perSystem = { config, pkgs, system, ... }: {
 
@@ -24,6 +22,8 @@
             (import rust-overlay)
           ];
         };
+
+        packages.default = pkgs.callPackage ./package.nix { };
 
         devShells.default = pkgs.mkShell rec {
           packages = with pkgs; [
